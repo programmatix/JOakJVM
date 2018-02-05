@@ -421,7 +421,8 @@ class JVM(classLoader: JVMClassLoader,
           arrayref(index) = value
 
         case 0x01 => // aconst_null
-          JVM.err("Cannot handle opcode aconst_null yet")
+          sf.stack.push(JVMVarObjectRefUnmanaged(null))
+
         case 0x19 => // aload
           val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
           val local = sf.getLocal(index)
@@ -474,6 +475,7 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xbf => // athrow
           JVM.err("Cannot handle opcode athrow yet")
+
         case 0x33 => // baload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val arrayrefRaw = sf.stack.pop().asInstanceOf[JVMVarObjectRefUnmanaged]
@@ -493,6 +495,7 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xca => // breakpoint
           JVM.err("Cannot handle opcode breakpoint yet")
+
         case 0x34 => // caload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val arrayrefRaw = sf.stack.pop().asInstanceOf[JVMVarObjectRefUnmanaged]
@@ -509,14 +512,24 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xc0 => // checkcast
           JVM.err("Cannot handle opcode checkcast yet")
-        case 0x90 => // d2f
-          JVM.err("Cannot handle opcode d2f yet")
+
+        case 0x90 => // d2flol
+          val value = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarFloat(value.toFloat))
+
         case 0x8e => // d2i
-          JVM.err("Cannot handle opcode d2i yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarInt(value.toInt))
+
         case 0x8f => // d2l
-          JVM.err("Cannot handle opcode d2l yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarLong(value.toLong))
+
         case 0x63 => // dadd
-          JVM.err("Cannot handle opcode dadd yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(v1 + v2))
+
         case 0x31 => // daload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val arrayrefRaw = sf.stack.pop().asInstanceOf[JVMVarObjectRefUnmanaged]
@@ -532,46 +545,88 @@ class JVM(classLoader: JVMClassLoader,
           arrayref(index) = value
 
         case 0x98 => // dcmpg
-          JVM.err("Cannot handle opcode dcmpg yet")
+          val value2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val value1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val toPush: Int = if (value1 > value2) 1
+          else if (value1 == value2) 0
+          else -1
+          sf.stack.push(JVMVarInt(toPush))
+
         case 0x97 => // dcmpl
-          JVM.err("Cannot handle opcode dcmpl yet")
+          val value2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val value1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val toPush: Int = if (value1 > value2) 1
+          else if (value1 == value2) 0
+          else -1
+          sf.stack.push(JVMVarInt(toPush))
+
         case 0x0e => // dconst_0
-          JVM.err("Cannot handle opcode dconst_0 yet")
+          sf.stack.push(JVMVarDouble(0))
+
         case 0x0f => // dconst_1
-          JVM.err("Cannot handle opcode dconst_1 yet")
+          sf.stack.push(JVMVarDouble(0))
+
         case 0x6f => // ddiv
-          JVM.err("Cannot handle opcode ddiv yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(v2 / v1))
+
         case 0x18 => // dload
-          JVM.err("Cannot handle opcode dload yet")
+          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val local = sf.getLocal(index)
+          sf.push(local)
+
         case 0x26 => // dload_0
-          JVM.err("Cannot handle opcode dload_0 yet")
+          sf.push(sf.getLocal(0))
+
         case 0x27 => // dload_1
-          JVM.err("Cannot handle opcode dload_1 yet")
+          sf.push(sf.getLocal(1))
+
         case 0x28 => // dload_2
-          JVM.err("Cannot handle opcode dload_2 yet")
+          sf.push(sf.getLocal(2))
+
         case 0x29 => // dload_3
-          JVM.err("Cannot handle opcode dload_3 yet")
+          sf.push(sf.getLocal(3))
+
         case 0x6b => // dmul
-          JVM.err("Cannot handle opcode dmul yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(v1 * v2))
+
         case 0x77 => // dneg
-          JVM.err("Cannot handle opcode dneg yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(-v1))
+
         case 0x73 => // drem
-          JVM.err("Cannot handle opcode drem yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(v1 + (v1 / v2) * v2))
+
         case 0xaf => // dreturn
           doReturn()
 
         case 0x39 => // dstore
-          JVM.err("Cannot handle opcode dstore yet")
+          val v1 = sf.stack.pop()
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
+          sf.addLocal(index, v1)
+
         case 0x47 => // dstore_0
-          JVM.err("Cannot handle opcode dstore_0 yet")
+          store(0)
+
         case 0x48 => // dstore_1
-          JVM.err("Cannot handle opcode dstore_1 yet")
+          store(1)
+
         case 0x49 => // dstore_2
-          JVM.err("Cannot handle opcode dstore_2 yet")
+          store(2)
+
         case 0x4a => // dstore_3
-          JVM.err("Cannot handle opcode dstore_3 yet")
+          store(3)
+
         case 0x67 => // dsub
-          JVM.err("Cannot handle opcode dsub yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarDouble].v
+          sf.stack.push(JVMVarDouble(v2 - v1))
+
         case 0x59 => // dup
           sf.stack.push(sf.stack.head)
 
@@ -590,9 +645,13 @@ class JVM(classLoader: JVMClassLoader,
           sf.push(JVMVarDouble(v1.v))
 
         case 0x8b => // f2i
-          JVM.err("Cannot handle opcode f2i yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarInt(value.toInt))
+
         case 0x8c => // f2l
-          JVM.err("Cannot handle opcode f2l yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarLong(value.toLong))
+
         case 0x62 => // fadd
           val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat]
           val v2 = sf.stack.pop().asInstanceOf[JVMVarFloat]
@@ -614,9 +673,20 @@ class JVM(classLoader: JVMClassLoader,
           arrayref(index) = value
 
         case 0x96 => // fcmpg
-          JVM.err("Cannot handle opcode fcmpg yet")
+          val value2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val value1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val toPush: Int = if (value1 > value2) 1
+          else if (value1 == value2) 0
+          else -1
+          sf.stack.push(JVMVarInt(toPush))
+
         case 0x95 => // fcmpl
-          JVM.err("Cannot handle opcode fcmpl yet")
+          val value2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val value1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val toPush: Int = if (value1 > value2) 1
+          else if (value1 == value2) 0
+          else -1
+          sf.stack.push(JVMVarInt(toPush))
 
         case 0x0b => // fconst_0
           sf.stack.push(JVMVarFloat(0))
@@ -628,7 +698,9 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarFloat(2))
 
         case 0x6e => // fdiv
-          JVM.err("Cannot handle opcode fdiv yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarFloat(v2 / v1))
 
         case 0x17 => // fload
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
@@ -652,11 +724,19 @@ class JVM(classLoader: JVMClassLoader,
           sf.push(stored)
 
         case 0x6a => // fmul
-          JVM.err("Cannot handle opcode fmul yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarFloat(v2 * v1))
+
         case 0x76 => // fneg
-          JVM.err("Cannot handle opcode fneg yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarFloat(-v1))
+
         case 0x72 => // frem
-          JVM.err("Cannot handle opcode frem yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarFloat(v1 + (v1 / v2) * v1))
+
         case 0xae => // freturn
           doReturn()
 
@@ -682,9 +762,13 @@ class JVM(classLoader: JVMClassLoader,
           sf.addLocal(3, v1)
 
         case 0x66 => // fsub
-          JVM.err("Cannot handle opcode fsub yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarFloat].v
+          sf.stack.push(JVMVarFloat(v2 - v1))
+
         case 0xb4 => // getfield
           JVM.err("Cannot handle opcode getfield yet")
+
         case 0xb2 => // getstatic
           // getstatic pops objectref (a reference to an object) from the stack, retrieves the value of the static field
           // (also known as a class field) identified by <field-spec> from objectref, and pushes the one-word or two-word
@@ -727,6 +811,7 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xc8 => // goto_w
           JVM.err("Cannot handle opcode goto_w yet")
+
         case 0x91 => // i2b
           val value = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val raw = value.toByte
@@ -740,9 +825,13 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarInt(raw))
 
         case 0x87 => // i2d
-          JVM.err("Cannot handle opcode i2d yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
+          sf.stack.push(JVMVarDouble(value.toDouble))
+
         case 0x86 => // i2f
-          JVM.err("Cannot handle opcode i2f yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
+          sf.stack.push(JVMVarFloat(value.toFloat))
+
         case 0x85 => // i2l
           val value = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val extended = JVMClassFileReaderUtils.extendIntAsTwosComplement(value)
@@ -808,7 +897,7 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(v3)
 
         case 0xa5 => // if_acmpeq
-          JVM.err("Cannot handle opcode if_acmpeq yet")
+          JVM.err("Cannot handle opcode if_acmpne yet")
         case 0xa6 => // if_acmpne
           JVM.err("Cannot handle opcode if_acmpne yet")
         case 0x9f => // if_icmpeq
@@ -988,14 +1077,24 @@ class JVM(classLoader: JVMClassLoader,
           JVM.err("Cannot handle opcode jsr yet")
         case 0xc9 => // jsr_w
           JVM.err("Cannot handle opcode jsr_w yet")
+
         case 0x8a => // l2d
-          JVM.err("Cannot handle opcode l2d yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarDouble(value.toDouble))
+
         case 0x89 => // l2f
-          JVM.err("Cannot handle opcode l2f yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarFloat(value.toFloat))
+
         case 0x88 => // l2i
-          JVM.err("Cannot handle opcode l2i yet")
+          val value = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarInt(value.toInt))
+
         case 0x61 => // ladd
-          JVM.err("Cannot handle opcode ladd yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 + v1))
+
         case 0x2f => // laload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val arrayrefRaw = sf.stack.pop().asInstanceOf[JVMVarObjectRefUnmanaged]
@@ -1004,7 +1103,10 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarLong(value))
 
         case 0x7f => // land
-          JVM.err("Cannot handle opcode land yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 & v1))
+
         case 0x50 => // lastore
           val value = sf.stack.pop().asInstanceOf[JVMVarLong].v
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
@@ -1013,11 +1115,19 @@ class JVM(classLoader: JVMClassLoader,
           arrayref(index) = value
 
         case 0x94 => // lcmp
-          JVM.err("Cannot handle opcode lcmp yet")
+          val value2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val value1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val toPush: Int = if (value1 > value2) 1
+          else if (value1 == value2) 0
+          else -1
+          sf.stack.push(JVMVarInt(toPush))
+
         case 0x09 => // lconst_0
-          JVM.err("Cannot handle opcode lconst_0 yet")
+          sf.stack.push(JVMVarLong(0))
+
         case 0x0a => // lconst_1
-          JVM.err("Cannot handle opcode lconst_1 yet")
+          sf.stack.push(JVMVarLong(0))
+
         case 0x12 => // ldc
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val c = cf.getConstant(index)
@@ -1034,57 +1144,106 @@ class JVM(classLoader: JVMClassLoader,
           JVM.err("Cannot handle opcode ldc_w yet")
         case 0x14 => // ldc2_w
           JVM.err("Cannot handle opcode ldc2_w yet")
+
         case 0x6d => // ldiv
-          JVM.err("Cannot handle opcode ldiv yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 / v1))
+
         case 0x16 => // lload
-          JVM.err("Cannot handle opcode lload yet")
+          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val local = sf.getLocal(index)
+          sf.push(local)
+
         case 0x1e => // lload_0
-          JVM.err("Cannot handle opcode lload_0 yet")
+          load(0)
+
         case 0x1f => // lload_1
-          JVM.err("Cannot handle opcode lload_1 yet")
+          load(1)
+
         case 0x20 => // lload_2
-          JVM.err("Cannot handle opcode lload_2 yet")
+          load(2)
+
         case 0x21 => // lload_3
-          JVM.err("Cannot handle opcode lload_3 yet")
+          load(3)
+
         case 0x69 => // lmul
-          JVM.err("Cannot handle opcode lmul yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarFloat(v2 * v1))
+
         case 0x75 => // lneg
-          JVM.err("Cannot handle opcode lneg yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarFloat(-v1))
+
         case 0xab => // lookupswitch
           JVM.err("Cannot handle opcode lookupswitch yet")
         case 0x81 => // lor
-          JVM.err("Cannot handle opcode lor yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 | v1))
+
         case 0x71 => // lrem
-          JVM.err("Cannot handle opcode lrem yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v1 + (v1 / v2) * v2))
+
         case 0xad => // lreturn
           doReturn()
 
         case 0x79 => // lshl
-          JVM.err("Cannot handle opcode lshl yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val bottom = v1 & 0x1f // bottom 5 bits
+          val v3 = JVMVarLong(v2 << bottom)
+          sf.stack.push(v3)
+
         case 0x7b => // lshr
-          JVM.err("Cannot handle opcode lshr yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val bottom = v1 & 0x1f // bottom 5 bits
+        val v3 = JVMVarLong(v2 >> bottom)
+          sf.stack.push(v3)
+
         case 0x37 => // lstore
-          JVM.err("Cannot handle opcode lstore yet")
+          val v1 = sf.stack.pop()
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
+          sf.addLocal(index, v1)
+
         case 0x3f => // lstore_0
-          JVM.err("Cannot handle opcode lstore_0 yet")
+          store(0)
+
         case 0x40 => // lstore_1
-          JVM.err("Cannot handle opcode lstore_1 yet")
+          store(1)
+
         case 0x41 => // lstore_2
-          JVM.err("Cannot handle opcode lstore_2 yet")
+          store(2)
+
         case 0x42 => // lstore_3
-          JVM.err("Cannot handle opcode lstore_3 yet")
+          store(3)
+
         case 0x65 => // lsub
-          JVM.err("Cannot handle opcode lsub yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 - v1))
+
         case 0x7d => // lushr
           JVM.err("Cannot handle opcode lushr yet")
+
         case 0x83 => // lxor
-          JVM.err("Cannot handle opcode lxor yet")
+          val v1 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          val v2 = sf.stack.pop().asInstanceOf[JVMVarLong].v
+          sf.stack.push(JVMVarLong(v2 ^ v1))
+
         case 0xc2 => // monitorenter
           JVM.err("Cannot handle opcode monitorenter yet")
+
         case 0xc3 => // monitorexit
           JVM.err("Cannot handle opcode monitorexit yet")
+
         case 0xc5 => // multianewarray
           JVM.err("Cannot handle opcode multianewarray yet")
+
         case 0xbb => // new
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val cls = cf.getConstant(index).asInstanceOf[ConstantClass]
@@ -1092,7 +1251,6 @@ class JVM(classLoader: JVMClassLoader,
             case Some(newInstance) => sf.stack.push(newInstance)
             case _                 =>
           }
-
 
         case 0xbc => // newarray
           val atype = op.args.head.asInstanceOf[JVMVarInteger].asInt
@@ -1139,9 +1297,11 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xa9 => // ret
           JVM.err("Cannot handle opcode ret yet")
+
         case 0xb1 => // return
           if (params.onReturn.isDefined) params.onReturn.get(sf)
           done = true
+
         case 0x35 => // saload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
           val arrayrefRaw = sf.stack.pop().asInstanceOf[JVMVarObjectRefUnmanaged]
@@ -1161,6 +1321,7 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0x5f => // swap
           JVM.err("Cannot handle opcode swap yet")
+
         case 0xaa => // tableswitch
           JVM.err("Cannot handle opcode tableswitch yet")
 
@@ -1204,7 +1365,7 @@ object JVM {
     throw new InternalError(message)
   }
 
-//    def unsupported(err: String) = JVMGenUnsupportedCurrently(err)
+  //    def unsupported(err: String) = JVMGenUnsupportedCurrently(err)
 
   def err(sf: StackFrame, message: String): Unit = {
     println(s"Error ${sf.cf.className}.${sf.methodName}: " + message)
