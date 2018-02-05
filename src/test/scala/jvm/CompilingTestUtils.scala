@@ -33,13 +33,13 @@ object CompilingTestUtils {
   def executeOpcode(opcodes: Seq[JVMOpCodeWithArgs], params: ExecuteParams = ExecuteParams()): ExecuteOpcodeResult = {
     val classLoader = new JVMClassLoader(Seq())
     val jvm = new JVM(classLoader)
-    val sf = new StackFrame(null, "fake")
+    val sf = new StackFrame(null, "fake", "fake")
     jvm.executeFrame(sf, opcodes, params)
     ExecuteOpcodeResult(jvm, sf)
   }
 
   // Compiles a .java file to .class and returns the .class filename, if successful
-  def compileJavaFile(javaFile: File, classPathDir: File): Option[File] = {
+  def compileJavaFile(javaFile: File, classPathDirs: Seq[File]): Option[File] = {
 
     try {
       // https://stackoverflow.com/questions/21544446/how-do-you-dynamically-compile-and-load-external-java-classes
@@ -50,7 +50,8 @@ object CompilingTestUtils {
 
       val optionList = new util.ArrayList[String]()
 
-      val classPath = classPathDir.getAbsolutePath.replace("\\.\\", "\\") + ";" + System.getProperty("java.class.path")
+      val classPathDir = classPathDirs.map(v => v.getAbsolutePath.replace("\\.\\", "\\")).mkString(";")
+      val classPath = classPathDir + ";" + System.getProperty("java.class.path")
       optionList.add("-classpath");
       optionList.add(classPath)
 
@@ -108,7 +109,7 @@ object CompilingTestUtils {
 
   def compileAndExecuteJavaFileX(resource: String, classToExecute: String, funcToExecute: String = "main", onReturn: (StackFrame) => Unit = (sf) => {
     assert(sf.stack.isEmpty)
-  }): CompileResults = {
+  }, classPath: Seq[String] = Seq()): CompileResults = {
     //    val javaFilename = Thread.currentThread().getContextClassLoader().getResource(resource)
     val sampleDir = "./JOakJVM/src/test/resources/java/"
     val javaFilename = sampleDir + resource
@@ -116,9 +117,9 @@ object CompilingTestUtils {
     assert(javaFile.exists())
     val classPathDir = new File(sampleDir)
 
-    CompilingTestUtils.compileJavaFile(javaFile, classPathDir) match {
+    CompilingTestUtils.compileJavaFile(javaFile, classPath.map(v => new File(v)) :+ classPathDir) match {
       case Some(classFile) =>
-        val classLoader = new JVMClassLoader(Seq(sampleDir), JVMClassLoaderParams(verbose = true,ReadParams(verbose = false)))
+        val classLoader = new JVMClassLoader(Seq(sampleDir) ++ classPath, JVMClassLoaderParams(verbose = true,ReadParams(verbose = false)))
         val jvm = new JVM(classLoader)
         jvm.execute(classToExecute, funcToExecute, ExecuteParams(onReturn = Some(onReturn), ui = new UIStdOut()))
 

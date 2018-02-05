@@ -4,6 +4,8 @@ libraryDependencies += "com.lihaoyi" %% "fastparse" % "1.0.0"
 libraryDependencies += "org.scalafx" %% "scalafx" % "8.0.144-R12"
 libraryDependencies += "org.scalafx" %% "scalafxml-core-sfx8" % "0.4"
 libraryDependencies += "com.jfoenix" % "jfoenix" % "9.0.1"
+// https://mvnrepository.com/artifact/net.sf.jopt-simple/jopt-simple
+libraryDependencies += "net.sf.jopt-simple" % "jopt-simple" % "5.0.4"
 
 exportJars := true
 

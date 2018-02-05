@@ -12,7 +12,7 @@ import ui.{UIInterface, UIStdOut}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-class StackFrame(val cf: JVMClassFile, val methodName: String) {
+class StackFrame(val cf: JVMClassFile, val methodName: String, val methodDescriptor: String) {
   val locals = mutable.Map[Int, JVMVar]()
 
   // Only bytes, shorts and ints can be pushed directly onto the stack.  Other types get stored as locals.
@@ -88,6 +88,48 @@ class JVM(classLoader: JVMClassLoader,
       context.staticClasses.find(_.cf.fullName() == className) match {
         case Some(sc) =>
           sc.putField(name, fieldType, value)
+        case _        =>
+          JVM.err("Cannot find static class")
+        // JVMClassStatic is usually created on <clinit>, but seeing class files where this isn't defined sometimes
+        // So just create it whenever needed
+        //            val staticClass = new JVMClassStatic(cf)
+        //            context.staticClasses += staticClass
+        //            staticClass.putField(name, fieldType, value)
+      }
+      //    }
+    }
+  }
+
+  private[jvm] def getField(sf: StackFrame, index: Int, getObjectRef: Boolean, params: ExecuteParams, context: JVMContext): Unit = {
+    val cf = sf.cf
+    val fieldRef = cf.getConstant(index).asInstanceOf[ConstantFieldref]
+    val clsRef = cf.getConstant(fieldRef.classIndex).asInstanceOf[ConstantClass]
+    val className = cf.getString(clsRef.nameIndex).replace('/', '.')
+    val nameAndType = cf.getConstant(fieldRef.nameAndTypeIndex).asInstanceOf[ConstantNameAndType]
+
+    val name = cf.getString(nameAndType.nameIndex)
+    val descriptor = cf.getString(nameAndType.descriptorIndex)
+
+    val fieldType = JVMMethodDescriptors.fieldDescriptorToTypes(descriptor)
+
+    if (getObjectRef) {
+      val objectRef = sf.stack.pop()
+
+      objectRef match {
+        case v: JVMVarObjectRefManaged =>
+          sf.push(v.klass.getField(name))
+
+        case v: JVMVarObjectRefUnmanaged =>
+          JVM.err(sf, "cannot getfield on non-klas yet")
+      }
+    }
+    else {
+
+
+      //      case _ =>
+      context.staticClasses.find(_.cf.fullName() == className) match {
+        case Some(sc) =>
+          sf.push(sc.getField(name))
         case _        =>
           JVM.err("Cannot find static class")
         // JVMClassStatic is usually created on <clinit>, but seeing class files where this isn't defined sometimes
@@ -270,7 +312,7 @@ class JVM(classLoader: JVMClassLoader,
     classLoader.loadClass(resolvedClassName, this, params) match {
 
       case Some(clsRef) =>
-        clsRef.getMethod(methodName) match {
+        clsRef.getMethod(methodName,methodDescriptor) match {
           case Some(method) =>
 
             // This pops from the stack, and needs to be done before getting the object ref
@@ -323,10 +365,13 @@ class JVM(classLoader: JVMClassLoader,
 
                     if (code.isEmpty) {
                       val superClassName = cfExamining.getSuperClassName()
+
                       classLoader.loadClass(superClassName, this, params) match {
+
                         case Some(superClsRef) =>
                           cfExamining = superClsRef
                           params.ui.log(s"Looking for overridden method in super ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+
                         case _ =>
                           JVM.err(sf, "Cannot handle managed classes extending unmanaged yet")
                       }
@@ -340,13 +385,17 @@ class JVM(classLoader: JVMClassLoader,
                 newCf = Some(clsRef)
             }
 
-            val args: Seq[JVMVar] = if (methodName == "<init>") {
+            assert (code.isDefined)
+            assert (newCf.isDefined)
+
+//            val args: Seq[JVMVar] = if (methodName == "<init>") {
+            val args: Seq[JVMVar] = if (getObjectRef) {
               // TODO can't find in spec, but this pointer is definitely passed too
               argsRaw :+ JVMVarObjectRefManaged(objectRef.asInstanceOf[JVMClassInstance])
             }
             else argsRaw
 
-            val sfNew = new StackFrame(newCf.get, methodName)
+            val sfNew = new StackFrame(newCf.get, methodName, methodDescriptor)
 
             sfNew.locals ++= args.reverse.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
 
@@ -392,8 +441,6 @@ class JVM(classLoader: JVMClassLoader,
 
           val methodRef = clsRef.getMethod(methodName, argTypes: _*)
 
-          // Spec for invokevirtual says, if we can't call the method on the given objectRef, do it recursively with the objectRef's superclass
-          // We take advantage of running on a JVM here and just try to execute it, rather than implementing all the what-can-call-what rules
           var objectRefTrying: Any = objectRef
           var result: Any = null
 
@@ -401,14 +448,20 @@ class JVM(classLoader: JVMClassLoader,
             params.ui.log(s"Executing unmanaged method ${resolvedClassName} ${methodName} on ref ${objectRef} with args ${args}")
 
             //            while (objectRefTrying != null) {
-//              try {
+              try {
+                // Spec for invokevirtual says, if we can't call the method on the given objectRef, do it recursively with the objectRef's superclass
+                // We take advantage of running on a JVM here and just try to execute it, rather than implementing all the what-can-call-what rules
+
                 result = methodRef.invoke(objectRef, args: _*) // :_* is the hint to expand the Seq to varargs
 
                 // Done!
                 objectRefTrying = null
-//              }
-//              catch {
-//                case e: IllegalAccessException =>
+              }
+              catch {
+                case e: IllegalAccessException =>
+                  params.ui.log(s"Warning: could not execute ${resolvedClassName} ${methodName} with args ${args}")
+
+              }
 //                  val newObjectRef = objectRefTrying.getClass.getSuperclass.cast(objectRefTrying)
 //                  objectRefTrying = newObjectRef
 //              }
@@ -962,7 +1015,8 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarFloat(v2 - v1))
 
         case 0xb4 => // getfield
-          JVM.err("Cannot handle opcode getfield yet")
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
+getField(sf, index, true, params, context)
 
         case 0xb2 => // getstatic
           // getstatic pops objectref (a reference to an object) from the stack, retrieves the value of the static field
@@ -1133,7 +1187,13 @@ class JVM(classLoader: JVMClassLoader,
           }
 
         case 0x99 => // ifeq
-          JVM.err("Cannot handle opcode ifeq yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value == 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0x9c => // ifge
           JVM.err("Cannot handle opcode ifge yet")
         case 0x9d => // ifgt
@@ -1547,7 +1607,7 @@ class JVM(classLoader: JVMClassLoader,
     cls.getMethod(functionName) match {
       case Some(method) =>
         val code = method.getCode().codeOrig
-        val sf = new StackFrame(cls, functionName)
+        val sf = new StackFrame(cls, functionName, cls.getString(method.descriptorIndex))
         executeFrame(sf, code, parms)
       case _            => JVM.err(s"Unable to find method $functionName in class ${cls.className}")
     }

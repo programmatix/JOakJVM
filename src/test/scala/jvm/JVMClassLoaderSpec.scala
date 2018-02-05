@@ -10,5 +10,9 @@ class JVMClassLoaderSpec extends FunSuite {
     }).jvm
   }
 
+  test("CallJar") {
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFileX("CallJar.java", "CallJar", "main", (sf) => {
+    }, classPath = Seq("JOakJVM/src/test/resources/jopt-simple-4.5.jar")).jvm
+  }
 
 }
