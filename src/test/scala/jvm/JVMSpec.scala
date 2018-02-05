@@ -3,7 +3,7 @@ package jvm
 import java.util
 
 import jvm.JVMTypesInternal.{JVMVarNewInstanceToken, JVMVarObjectRefUnmanaged}
-import jvmclass.JVMByteCode.{JVMVarInt, JVMVarLong, JVMVarString}
+import jvmclass.JVMByteCode.{JVMVarBoolean, JVMVarInt, JVMVarLong, JVMVarString}
 import org.scalatest.FunSuite
 
 class JVMSpec extends FunSuite {
@@ -192,6 +192,23 @@ class JVMSpec extends FunSuite {
   test("CreateOwnClass") {
     val jvm = CompilingTestUtils.compileAndExecuteJavaFile("CreateOwnClass.java", (sf) => {
       assert(CompilingTestUtils.getKlassInstanceLocal(sf).getField("str") == JVMVarString("hello"))
+    }).jvm
+  }
+
+
+  test("PassArrayListToCollection") {
+    var ret = 0
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("PassArrayListToCollection.java", (sf) => {
+      if (ret == 0) {
+        assert(sf.stack.head.asInstanceOf[JVMVarInt].v == 1)
+      }
+      ret += 1
+    }).jvm
+  }
+
+  test("PassArrayListToCollectionUnmanaged") {
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("PassArrayListToCollectionUnmanaged.java", (sf) => {
+        assert(CompilingTestUtils.containsVar(sf, JVMVarBoolean(true)))
     }).jvm
   }
 
