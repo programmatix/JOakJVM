@@ -302,27 +302,34 @@ class JVM(classLoader: JVMClassLoader,
                   // invokevirtual: see if there's an overridden version of this method
                   params.ui.log(s"Finding correct method for ${resolvedClassName} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
 
+                  var cfExamining = v.cf
+
                   while (code.isEmpty) {
-                    val possiblySimilarMethods = v.cf.getMethods(methodName)
+                    val possiblySimilarMethods = cfExamining.getMethods(methodName)
 
                     possiblySimilarMethods.foreach(m => {
                       if (code.isEmpty) {
-                        val mDescriptor = v.cf.getString(m.descriptorIndex)
+                        val mDescriptor = cfExamining.getString(m.descriptorIndex)
 
                         if (mDescriptor == methodDescriptor) {
                           // Found an overridden version
                           code = Some(m.getCode().codeOrig)
-                          newCf = Some(v.cf)
+                          newCf = Some(cfExamining)
 
-                          params.ui.log(s"Found overridden method in ${v.cf.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+                          params.ui.log(s"Found overridden method in ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
                         }
                       }
                     })
 
                     if (code.isEmpty) {
-                      val superClassName = v.cf.getSuperClassName()
-
-                      params.ui.log(s"Looking for overridden method in super ${superClassName} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+                      val superClassName = cfExamining.getSuperClassName()
+                      classLoader.loadClass(superClassName, this, params) match {
+                        case Some(superClsRef) =>
+                          cfExamining = superClsRef
+                          params.ui.log(s"Looking for overridden method in super ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+                        case _ =>
+                          JVM.err(sf, "Cannot handle managed classes extending unmanaged yet")
+                      }
                     }
                   }
                 }

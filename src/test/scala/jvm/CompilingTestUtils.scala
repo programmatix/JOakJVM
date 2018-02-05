@@ -110,7 +110,7 @@ object CompilingTestUtils {
     assert(sf.stack.isEmpty)
   }): CompileResults = {
     //    val javaFilename = Thread.currentThread().getContextClassLoader().getResource(resource)
-    val sampleDir = "./src/test/resources/java/"
+    val sampleDir = "./JOakJVM/src/test/resources/java/"
     val javaFilename = sampleDir + resource
     val javaFile = new File(javaFilename)
     assert(javaFile.exists())

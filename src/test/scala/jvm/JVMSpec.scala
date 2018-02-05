@@ -242,4 +242,25 @@ class JVMSpec extends FunSuite {
     }).jvm
   }
 
+  test("InvokeVirtualAsSuperTwoLevels") {
+    var ret = 0
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("InvokeVirtualAsSuperTwoLevels.java", (sf) => {
+      if (ret == 3) {
+        assert(sf.stack.head.asInstanceOf[JVMVarString].v == "citrus")
+      }
+      ret += 1
+    }).jvm
+  }
+
+
+  test("InvokeVirtualAsSuperTopLevel") {
+    var ret = 0
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("InvokeVirtualAsSuperTopLevel.java", (sf) => {
+      if (ret == 3) {
+                assert(sf.stack.head.asInstanceOf[JVMVarString].v == "fruit")
+      }
+      ret += 1
+    }).jvm
+  }
+
 }
