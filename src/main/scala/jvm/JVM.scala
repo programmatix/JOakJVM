@@ -7,6 +7,7 @@ import jvmclass.JVMClassFileReader.ReadParams
 import jvmclass.internal.JVMClassFileReaderUtils
 import jvmclass.JVMClassFileTypes._
 import jvmclass.JVMTypes._
+import ui.UIInterface
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -38,7 +39,9 @@ class StackFrame(val cf: JVMClassFile, val methodName: String) {
 
 case class ExecuteParams(
                           // For testing: called just before a return
-                          onReturn: Option[(StackFrame) => Unit] = None
+                          onReturn: Option[(StackFrame) => Unit] = None,
+
+                          ui: UIInterface = new UIInterface {}
                         )
 
 class JVMContext {
@@ -52,7 +55,7 @@ class JVM(classLoader: JVMClassLoader,
 
   private[jvm] val context = new JVMContext
 
-  private[jvm] def putField(sf: StackFrame, index: Int, objectRef: Option[JVMObjectRef], params: ExecuteParams, context: JVMContext): Unit = {
+  private[jvm] def putField(sf: StackFrame, index: Int, getObjectRef: Boolean, params: ExecuteParams, context: JVMContext): Unit = {
     val cf = sf.cf
     //  java/io/PrintStream
     val fieldRef = cf.getConstant(index).asInstanceOf[ConstantFieldref]
@@ -67,21 +70,33 @@ class JVM(classLoader: JVMClassLoader,
     val fieldType = JVMMethodDescriptors.fieldDescriptorToTypes(descriptor)
 
     val value = sf.stack.pop()
+    if (getObjectRef) {
+      val objectRef = sf.stack.pop()
 
-    objectRef match {
-      case Some(v: JVMVarObjectRefManaged) =>
-        v.klass.putField(name, fieldType, value)
+      objectRef match {
+        case v: JVMVarObjectRefManaged =>
+          v.klass.putField(name, fieldType, value)
 
-      case Some(v: JVMVarObjectRefUnmanaged) =>
-        JVM.err(sf, "cannot putfield on non-klas yet")
+        case v: JVMVarObjectRefUnmanaged =>
+          JVM.err(sf, "cannot putfield on non-klas yet")
+      }
+    }
+    else {
 
-      case _ =>
-        context.staticClasses.find(_.cf.fullName() == className) match {
-          case Some(sc) =>
-            sc.putField(name, fieldType, value)
-          case _        =>
-            JVM.err(sf, s"do not have static class for ${sf.cf.className}")
-        }
+
+      //      case _ =>
+      context.staticClasses.find(_.cf.fullName() == className) match {
+        case Some(sc) =>
+          sc.putField(name, fieldType, value)
+        case _        =>
+          JVM.err("Cannot find static class")
+        // JVMClassStatic is usually created on <clinit>, but seeing class files where this isn't defined sometimes
+        // So just create it whenever needed
+        //            val staticClass = new JVMClassStatic(cf)
+        //            context.staticClasses += staticClass
+        //            staticClass.putField(name, fieldType, value)
+      }
+      //    }
     }
   }
 
@@ -99,90 +114,90 @@ class JVM(classLoader: JVMClassLoader,
         case v: JVMTypeObjectStr =>
           // Should have been resolved to JVMTypeClsRef
           JVM.err(s"not expecting JVMTypeObjectStr here")
-//          next match {
-//            case x: JVMVarString             =>
-//              args += x.v
-//              argTypes += classOf[java.lang.String]
-//            case x: JVMVarObject             =>
-//              args += x.o
-//              argTypes += x.o.getClass
-//            case x: JVMVarObjectRefUnmanaged =>
-//              args += x.o
-//              argTypes += x.o.getClass
-//            case x: JVMVarNewInstanceToken   =>
-//              args += x.created.get
-//              argTypes += x.created.get.getClass
-//            case _                           =>
-//              JVM.err(sf, s"cannot handle arg ${next} yet")
-//          }
-        case v: JVMTypeVoid      =>
+        //          next match {
+        //            case x: JVMVarString             =>
+        //              args += x.v
+        //              argTypes += classOf[java.lang.String]
+        //            case x: JVMVarObject             =>
+        //              args += x.o
+        //              argTypes += x.o.getClass
+        //            case x: JVMVarObjectRefUnmanaged =>
+        //              args += x.o
+        //              argTypes += x.o.getClass
+        //            case x: JVMVarNewInstanceToken   =>
+        //              args += x.created.get
+        //              argTypes += x.created.get.getClass
+        //            case _                           =>
+        //              JVM.err(sf, s"cannot handle arg ${next} yet")
+        //          }
+        case v: JVMTypeVoid =>
           JVM.err(s"not expecting void here")
 
-          // Handle primitive types
-        case v: JVMTypeBoolean   =>
+        // Handle primitive types
+        case v: JVMTypeBoolean =>
           args += next.asInstanceOf[JVMVarBoolean].v.asInstanceOf[Object]
           argTypes += java.lang.Boolean.TYPE
-        case v: JVMTypeInt       =>
+        case v: JVMTypeInt     =>
           args += next.asInstanceOf[JVMVarInt].v.asInstanceOf[Object]
           // Type gives us the class of the primitive
           argTypes += java.lang.Integer.TYPE
-        case v: JVMTypeShort     =>
+        case v: JVMTypeShort   =>
           args += next.asInstanceOf[JVMVarShort].v.asInstanceOf[Object]
           argTypes += java.lang.Short.TYPE
-        case v: JVMTypeByte      =>
+        case v: JVMTypeByte    =>
           args += next.asInstanceOf[JVMVarByte].v.asInstanceOf[Object]
           argTypes += java.lang.Byte.TYPE
-        case v: JVMTypeChar      =>
+        case v: JVMTypeChar    =>
           args += next.asInstanceOf[JVMVarChar].v.asInstanceOf[Object]
           argTypes += java.lang.Character.TYPE
-        case v: JVMTypeFloat     =>
+        case v: JVMTypeFloat   =>
           args += next.asInstanceOf[JVMVarFloat].v.asInstanceOf[Object]
           argTypes += java.lang.Float.TYPE
-        case v: JVMTypeDouble    =>
+        case v: JVMTypeDouble  =>
           args += next.asInstanceOf[JVMVarDouble].v.asInstanceOf[Object]
           argTypes += java.lang.Double.TYPE
-        case v: JVMTypeLong      =>
+        case v: JVMTypeLong    =>
           args += next.asInstanceOf[JVMVarLong].v.asInstanceOf[Object]
           argTypes += java.lang.Long.TYPE
 
-//        case v: JVMTypeObjectStr =>
-//          // java/util/List
-//          val className = v.clsRaw.replace('/', '.')
-//
-//          classLoader.loadClass(className, this, params) match {
-//            case Some(clsRef) =>
-//              JVM.err(sf, "can't handle passing around managed types")
-//
-//            case _ =>
-//              val raw = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
-//              val clsRef = ClassLoader.getSystemClassLoader.loadClass(className)
-//              args += raw
-//              argTypes += clsRef
-//          }
+        //        case v: JVMTypeObjectStr =>
+        //          // java/util/List
+        //          val className = v.clsRaw.replace('/', '.')
+        //
+        //          classLoader.loadClass(className, this, params) match {
+        //            case Some(clsRef) =>
+        //              JVM.err(sf, "can't handle passing around managed types")
+        //
+        //            case _ =>
+        //              val raw = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
+        //              val clsRef = ClassLoader.getSystemClassLoader.loadClass(className)
+        //              args += raw
+        //              argTypes += clsRef
+        //          }
 
         case v: JVMTypeArray =>
           v.typ match {
-//            case v: JVMTypeObjectStr =>
-//              val array = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
-//              // java/util/List
-//              val className = v.clsRaw.replace('/', '.')
-//
-//              classLoader.loadClass(className, this, params) match {
-//                case Some(clsRef) =>
-//                  JVM.err(sf, "can't handle passing around managed types")
-//
-//                case _ =>
-//                  val clsRef = ClassLoader.getSystemClassLoader.loadClass(className)
-//                  args += array
-//                  argTypes += classOf[Array[Object]]
-//              }
-            case _                   =>
+            //            case v: JVMTypeObjectStr =>
+            //              val array = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
+            //              // java/util/List
+            //              val className = v.clsRaw.replace('/', '.')
+            //
+            //              classLoader.loadClass(className, this, params) match {
+            //                case Some(clsRef) =>
+            //                  JVM.err(sf, "can't handle passing around managed types")
+            //
+            //                case _ =>
+            //                  val clsRef = ClassLoader.getSystemClassLoader.loadClass(className)
+            //                  args += array
+            //                  argTypes += classOf[Array[Object]]
+            //              }
+            case _ =>
               args += next.asObject
               argTypes += next.asObject.getClass
 
-//              val array = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
-//              args += array
-//              argTypes += array.getClass
+            //              val array = next.asInstanceOf[JVMVarObjectRefUnmanaged].o
+            //              args += array
+            //              argTypes += array.getClass
 
           }
       }
@@ -281,7 +296,7 @@ class JVM(classLoader: JVMClassLoader,
             }
             else argsRaw
 
-            sfNew.locals ++= args.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
+            sfNew.locals ++= args.reverse.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
 
             executeFrame(sfNew, code, params) match {
               case Some(ret) => sf.stack.push(ret)
@@ -504,6 +519,9 @@ class JVM(classLoader: JVMClassLoader,
       }
 
       val op = code(opcodeIdx)
+
+      params.ui.stopBeforeExecutingOpcode(op, sf)
+
       op.oc.hexcode match {
         case 0x32 => // aaload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
@@ -554,24 +572,19 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0x3a => // astore
           val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
-          val local = sf.stack.pop().asInstanceOf[JVMObjectRef]
-          sf.addLocal(index, local)
+          store(index)
 
         case 0x4b => // astore_0
-          val local = sf.stack.pop().asInstanceOf[JVMObjectRef]
-          sf.addLocal(0, local)
+          store(0)
 
         case 0x4c => // astore_1
-          val local = sf.stack.pop().asInstanceOf[JVMObjectRef]
-          sf.addLocal(1, local)
+          store(1)
 
         case 0x4d => // astore_2
-          val local = sf.stack.pop().asInstanceOf[JVMObjectRef]
-          sf.addLocal(2, local)
+          store(2)
 
         case 0x4e => // astore_3
-          val local = sf.stack.pop().asInstanceOf[JVMObjectRef]
-          sf.addLocal(3, local)
+          store(3)
 
         case 0xbf => // athrow
           JVM.err("Cannot handle opcode athrow yet")
@@ -1396,13 +1409,12 @@ class JVM(classLoader: JVMClassLoader,
           }
 
         case 0xb5 => // putfield
-          val objectRef = sf.stack.pop().asInstanceOf[JVMObjectRef]
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
-          putField(sf, index, Some(objectRef), params, context)
+          putField(sf, index, true, params, context)
 
         case 0xb3 => // putstatic
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
-          putField(sf, index, None, params, context)
+          putField(sf, index, false, params, context)
 
         case 0xa9 => // ret
           JVM.err("Cannot handle opcode ret yet")

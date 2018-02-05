@@ -212,4 +212,15 @@ class JVMSpec extends FunSuite {
     }).jvm
   }
 
+  test("PassMultipleArgsToManaged") {
+    var ret = 0
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("PassMultipleArgsToManaged.java", (sf) => {
+      if (ret == 1) {
+        assert(CompilingTestUtils.containsVar(sf, JVMVarString("hello!")))
+      }
+      ret += 1
+    }).jvm
+  }
+
+
 }
