@@ -62,7 +62,10 @@ class JVMClassLoader(paths: Seq[String], params: JVMClassLoaderParams = JVMClass
         val pathName = packageName.map(pn => path + "/" + pn.replace('.', '/')).getOrElse(path)
         val dir = new File(pathName)
         val javaFiles = dir.listFiles(new FileFilter {
-          override def accept(pathname: File): Boolean = pathname.getName.stripSuffix(".class") == clsName
+          override def accept(pathname: File): Boolean = {
+//            println(pathname.getCanonicalPath)
+            pathname.getName.stripSuffix(".class") == clsName
+          }
         })
         if (javaFiles != null) {
           if (params.verbose) {

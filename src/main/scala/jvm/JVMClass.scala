@@ -7,7 +7,7 @@ import jvmclass.{JVMByteCode, JVMClassFile}
 import scala.collection.mutable
 
 // An instance of 'JVMClassFile'
-class JVMClassInstance(cf: JVMClassFile) {
+class JVMClassInstance(val cf: JVMClassFile) {
   protected val fields = mutable.Map.empty[String, JVMVar]
 
   def getField(name: String): JVMVar = fields(name)
@@ -18,6 +18,6 @@ class JVMClassInstance(cf: JVMClassFile) {
 }
 
 // The static members of 'JVMClassFile'
-class JVMClassStatic(val cf: JVMClassFile) extends JVMClassInstance(cf)  {
+class JVMClassStatic(cf: JVMClassFile) extends JVMClassInstance(cf)  {
 
 }

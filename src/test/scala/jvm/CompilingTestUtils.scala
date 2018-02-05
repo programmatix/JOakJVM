@@ -8,6 +8,7 @@ import jvm.JVMTypesInternal.JVMVarObjectRefManaged
 import jvmclass.JVMByteCode
 import jvmclass.JVMByteCode.{JVMOpCodeWithArgs, JVMVar}
 import jvmclass.JVMClassFileReader.ReadParams
+import ui.UIStdOut
 
 
 object CompilingTestUtils {
@@ -109,7 +110,7 @@ object CompilingTestUtils {
     assert(sf.stack.isEmpty)
   }): CompileResults = {
     //    val javaFilename = Thread.currentThread().getContextClassLoader().getResource(resource)
-    val sampleDir = "./src/test/java/"
+    val sampleDir = "./src/test/resources/java/"
     val javaFilename = sampleDir + resource
     val javaFile = new File(javaFilename)
     assert(javaFile.exists())
@@ -119,7 +120,7 @@ object CompilingTestUtils {
       case Some(classFile) =>
         val classLoader = new JVMClassLoader(Seq(sampleDir), JVMClassLoaderParams(verbose = true,ReadParams(verbose = false)))
         val jvm = new JVM(classLoader)
-        jvm.execute(classToExecute, funcToExecute, ExecuteParams(onReturn = Some(onReturn)))
+        jvm.execute(classToExecute, funcToExecute, ExecuteParams(onReturn = Some(onReturn), ui = new UIStdOut()))
 
         CompileResults(jvm)
 
