@@ -4,9 +4,9 @@ import jvm.JVMTypesInternal._
 import jvmclass.JVMByteCode._
 import jvmclass.JVMClassFile
 import jvmclass.JVMClassFileReader.ReadParams
-import jvmclass.internal.JVMClassFileReaderUtils
 import jvmclass.JVMClassFileTypes._
 import jvmclass.JVMTypes._
+import jvmclass.internal.JVMClassFileReaderUtils
 import ui.{UIInterface, UIStdOut}
 
 import scala.collection.mutable
@@ -1195,15 +1195,45 @@ getField(sf, index, true, params, context)
           }
 
         case 0x9c => // ifge
-          JVM.err("Cannot handle opcode ifge yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value >= 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0x9d => // ifgt
-          JVM.err("Cannot handle opcode ifgt yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value > 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0x9e => // ifle
-          JVM.err("Cannot handle opcode ifle yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value <= 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0x9b => // iflt
-          JVM.err("Cannot handle opcode iflt yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value < 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0x9a => // ifne
-          JVM.err("Cannot handle opcode ifne yet")
+          val value = sf.pop().asInstanceOf[JVMVarInteger].asInt
+          if (value != 0) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0xc7 => // ifnonnull
           JVM.err("Cannot handle opcode ifnonnull yet")
         case 0xc6 => // ifnull

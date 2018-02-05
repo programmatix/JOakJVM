@@ -263,4 +263,17 @@ class JVMSpec extends FunSuite {
     }).jvm
   }
 
+
+  test("IfEqInt") {
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("IfEqInt.java", (sf) => {
+      assert(CompilingTestUtils.containsVar(sf, JVMVarInt(5)))
+    }).jvm
+  }
+
+  test("IfEqBoolean") {
+    val jvm = CompilingTestUtils.compileAndExecuteJavaFile("IfEqBoolean.java", (sf) => {
+      assert(CompilingTestUtils.containsVar(sf, JVMVarInt(5)))
+    }).jvm
+  }
+
 }

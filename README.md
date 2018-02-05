@@ -22,10 +22,11 @@ When you run JOak JVM you can specify the JVM classpath as normal, along with JO
 
 I use the term 'managed' to refer to code and classes handled by the JOak JVM, versus unmanaged which is handled by the standard Java JVM it's running upon.
 
+JOak JVM can handle jar files, just add them to the managed classpath using the same syntax as with the standard java executable.
+
 ## Limitations
 The following features aren't supported: 
 
-* Jar files.
 * synchronized keyword.
 * Threading in general.
 * native keyword.
@@ -50,7 +51,7 @@ java -cp <Unmanaged Classpath> -jar target/scala-2.12/JOakJVM-assembly-0.1-SNAPS
 
 <b>Unmanaged Classpath:</b> The standard Java classpath.  Any class files that need to be loaded and cannot be found on the managed classpath, will then be tried with the JVM system classloader using this classpath.
 
-<b>Managed Classpath:</b> JOak JVM's classpath, e.g. any class files you want to be loaded with JOak should be on here.  Semicolon separate just as with the unmanaged classpath.
+<b>Managed Classpath:</b> JOak JVM's classpath, e.g. any class files you want to be loaded with JOak should be on here.  Semicolon separate just as with the unmanaged classpath.  You can include jar files.
 
 <b>Class to Execute:</b> just as with the normal ```java``` command, e.g. "com.example.MyClass".  MyClass must contain a standard main() method.
 
