@@ -1,6 +1,7 @@
 package jvm
 
 import jvmclass.JVMByteCode.JVMVar
+import jvmclass.JVMClassFile
 import jvmclass.JVMTypes.JVMType
 
 object JVMTypesInternal {
@@ -9,9 +10,9 @@ object JVMTypesInternal {
 
   // Only used in the JVM itself
   //  case class JVMVarField(field: Field) extends JVMVar
-  case class JVMVarObject(o: Object) extends JVMTypeInternal with JVMVar {
-    override def asObject: Object = o.asInstanceOf[Object]
-  }
+//  case class JVMVarObject(o: Object) extends JVMTypeInternal with JVMVar {
+//    override def asObject: Object = o.asInstanceOf[Object]
+//  }
 
   sealed trait JVMObjectRef extends JVMTypeInternal with JVMVar
 
@@ -39,7 +40,8 @@ object JVMTypesInternal {
 
   // java/lang/String
   case class JVMTypeObjectStr(clsRaw: String) extends JVMTypeInternal
-  case class JVMTypeClsRef(clsRef: Class[_]) extends JVMTypeInternal
+  case class JVMTypeUnmanagedClsRef(clsRef: Class[_]) extends JVMTypeInternal
+  case class JVMTypeManagedClsRef(clsRef: JVMClassFile) extends JVMTypeInternal
 
   //  case class JVMTypeObjectCls(cls: Class[_]) extends JVMTypeInternal
   case class JVMTypeObjectRef(obj: Object) extends JVMTypeInternal

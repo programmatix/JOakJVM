@@ -57,91 +57,96 @@ class JVMClassLoader(pathsRaw: Seq[String], params: JVMClassLoaderParams = JVMCl
 
     val (clsName: String, packageName: Option[String]) = jvmclass.ClassNameHandler.split(name)
 
-    if (params.verbose && paths.isEmpty) println(s"Classloader: no paths configured")
-
-    // See if we've already loaded it
-    out = classFiles.find(cf => cf.packageName == packageName && cf.className == clsName)
-
-    if (out.isEmpty) {
-      paths.foreach(pathFile => {
-        val path = pathFile.getAbsolutePath
-
-        val javaFiles:Seq[File] = if (path.toLowerCase.endsWith(".jar")) {
-
-          val jf = new JarFile(path)
-          val it = jf.entries()
-          val ret: Seq[JarEntry] = jf.stream().filter(entry => {
-            val n = entry.getName
-            val resolved = n.stripSuffix(".class").replace('/','.')
-            n.endsWith(".class") && resolved == name
-          }).collect(Collectors.toList()).asScala
-
-          if (params.verbose) {
-            println(s"Classloader: [${path}] found ${ret.size} files matching required class $name")
-          }
-
-          ret.map(v => {
-            val temp = File.createTempFile(v.getName.stripSuffix(".class"), ".class")
-            val is = jf.getInputStream(v)
-            val os = new FileOutputStream(temp)
-
-            var x = 0
-            while (x != -1){
-              x = is.read()
-              os.write(x)
-            }
-
-            is.close()
-            os.close()
-
-            println(s"Classloader: Extracted ${v.getName} from ${path} into ${temp.getAbsolutePath}")
-
-            temp
-          })
-        }
-        else {
-          val pathName = packageName.map(pn => path + "/" + pn.replace('.', '/')).getOrElse(path)
-          val dir = new File(pathName)
-          val out = dir.listFiles(new FileFilter {
-            override def accept(pathname: File): Boolean = {
-              //            println(pathname.getCanonicalPath)
-              pathname.getName.stripSuffix(".class") == clsName
-            }
-          })
-
-          if (params.verbose) {
-            println(s"Classloader: [${dir.getCanonicalPath}] found ${if (out ==null)0 else out.size} files matching required class $name")
-          }
-
-          out
-        }
-
-        if (javaFiles != null) {
-          javaFiles.foreach(javaFile => {
-            JVMClassFileReader.read(packageName, clsName, javaFile, params.classfileRead) match {
-              case Some(cf) =>
-                classFiles += cf
-                out = Some(cf)
-
-                cf.getMethod("<clinit>") match {
-                  case Some(clinit) =>
-                    // Note there are all sorts of steps we're not doing from "2.17.5 Detailed Initialization Procedure" here, for thread-safety etc.  Toy JVM!
-                    val staticClass = new JVMClassStatic(cf)
-                    jvm.context.staticClasses += staticClass
-                    val sf = new StackFrame(cf, "<clinit>", "")
-                    jvm.executeFrame(sf, clinit.getCode().codeOrig, parms)
-
-                  case _ =>
-                }
-
-
-              case _ => JVM.err(s"unable to read classfile ${javaFile.getCanonicalPath}")
-            }
-          })
-        }
-      })
+    if (packageName.isDefined && packageName.get.startsWith("java.")) {
+      None
     }
+    else {
+      if (params.verbose && paths.isEmpty) println(s"Classloader: no paths configured")
 
-    out
+      // See if we've already loaded it
+      out = classFiles.find(cf => cf.packageName == packageName && cf.className == clsName)
+
+      if (out.isEmpty) {
+        paths.foreach(pathFile => {
+          val path = pathFile.getAbsolutePath
+
+          val javaFiles: Seq[File] = if (path.toLowerCase.endsWith(".jar")) {
+
+            val jf = new JarFile(path)
+            val it = jf.entries()
+            val ret: Seq[JarEntry] = jf.stream().filter(entry => {
+              val n = entry.getName
+              val resolved = n.stripSuffix(".class").replace('/', '.')
+              n.endsWith(".class") && resolved == name
+            }).collect(Collectors.toList()).asScala
+
+            if (params.verbose) {
+              println(s"Classloader: [${path}] found ${ret.size} files matching required class $name")
+            }
+
+            ret.map(v => {
+              val temp = File.createTempFile(v.getName.stripSuffix(".class"), ".class")
+              val is = jf.getInputStream(v)
+              val os = new FileOutputStream(temp)
+
+              var x = 0
+              while (x != -1) {
+                x = is.read()
+                os.write(x)
+              }
+
+              is.close()
+              os.close()
+
+              println(s"Classloader: Extracted ${v.getName} from ${path} into ${temp.getAbsolutePath}")
+
+              temp
+            })
+          }
+          else {
+            val pathName = packageName.map(pn => path + "/" + pn.replace('.', '/')).getOrElse(path)
+            val dir = new File(pathName)
+            val out = dir.listFiles(new FileFilter {
+              override def accept(pathname: File): Boolean = {
+                //            println(pathname.getCanonicalPath)
+                pathname.getName.stripSuffix(".class") == clsName
+              }
+            })
+
+            if (params.verbose) {
+              println(s"Classloader: [${dir.getCanonicalPath}] found ${if (out == null) 0 else out.size} files matching required class $name")
+            }
+
+            out
+          }
+
+          if (javaFiles != null) {
+            javaFiles.foreach(javaFile => {
+              JVMClassFileReader.read(packageName, clsName, javaFile, params.classfileRead) match {
+                case Some(cf) =>
+                  classFiles += cf
+                  out = Some(cf)
+
+                  cf.getMethod("<clinit>") match {
+                    case Some(clinit) =>
+                      // Note there are all sorts of steps we're not doing from "2.17.5 Detailed Initialization Procedure" here, for thread-safety etc.  Toy JVM!
+                      val staticClass = new JVMClassStatic(cf)
+                      jvm.context.staticClasses += staticClass
+                      val sf = new StackFrame(cf, "<clinit>", "")
+                      jvm.executeFrame(sf, clinit.getCode().codeOrig, parms)
+
+                    case _ =>
+                  }
+
+
+                case _ => JVM.err(s"unable to read classfile ${javaFile.getCanonicalPath}")
+              }
+            })
+          }
+        })
+      }
+
+      out
+    }
   }
 }

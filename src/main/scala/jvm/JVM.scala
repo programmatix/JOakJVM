@@ -12,7 +12,11 @@ import ui.{UIInterface, UIStdOut}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-class StackFrame(val cf: JVMClassFile, val methodName: String, val methodDescriptor: String) {
+class StackFrame(val cf: JVMClassFile,
+                // next 3 are for debugging
+                 val methodName: String,
+                 val methodDescriptor: String,
+                 val thisPointer: Object = null) {
   val locals = mutable.Map[Int, JVMVar]()
 
   // Only bytes, shorts and ints can be pushed directly onto the stack.  Other types get stored as locals.
@@ -55,6 +59,25 @@ class JVM(classLoader: JVMClassLoader,
 
   private[jvm] val context = new JVMContext
 
+  private[jvm] def checkCast(sf: StackFrame, index: Int, params: ExecuteParams, context: JVMContext): Unit = {
+    val cf = sf.cf
+    val clsRef = cf.getConstant(index).asInstanceOf[ConstantClass]
+    val className = cf.getString(clsRef.nameIndex).replace('/', '.')
+
+    val value = sf.stack.pop()
+
+    value match {
+      case null                        =>
+      case v: JVMVarString             => if (className != "java.lang.String") throw new ClassCastException
+      case v: JVMVarObjectRefUnmanaged =>
+        if (v.o != null) JVM.err(sf, "Cannot handle checkcast on unmanaged types")
+      case v: JVMVarObjectRefManaged   =>
+        if (v.klass != null) JVM.err(sf, "Cannot handle checkcast on managed types")
+    }
+
+    sf.stack.push(value)
+  }
+
   private[jvm] def putField(sf: StackFrame, index: Int, getObjectRef: Boolean, params: ExecuteParams, context: JVMContext): Unit = {
     val cf = sf.cf
     //  java/io/PrintStream
@@ -75,6 +98,7 @@ class JVM(classLoader: JVMClassLoader,
 
       objectRef match {
         case v: JVMVarObjectRefManaged =>
+          params.ui.log(s"Putting field ${name} v=${value} on managed instance of ${v.klass.cf.fullName()}")
           v.klass.putField(name, fieldType, value)
 
         case v: JVMVarObjectRefUnmanaged =>
@@ -87,6 +111,7 @@ class JVM(classLoader: JVMClassLoader,
       //      case _ =>
       context.staticClasses.find(_.cf.fullName() == className) match {
         case Some(sc) =>
+          params.ui.log(s"Putting field ${name} v=${value} on managed static of ${className}")
           sc.putField(name, fieldType, value)
         case _        =>
           JVM.err("Cannot find static class")
@@ -150,10 +175,10 @@ class JVM(classLoader: JVMClassLoader,
     methodTypes.args.reverse.foreach(desired => {
       val next = sf.pop()
       desired match {
-        case v: JVMTypeClsRef    =>
+        case v: JVMTypeUnmanagedClsRef =>
           args += next.asObject
           argTypes += v.clsRef
-        case v: JVMTypeObjectStr =>
+        case v: JVMTypeObjectStr       =>
           // Should have been resolved to JVMTypeClsRef
           JVM.err(s"not expecting JVMTypeObjectStr here")
         //          next match {
@@ -190,7 +215,7 @@ class JVM(classLoader: JVMClassLoader,
           args += next.asInstanceOf[JVMVarByte].v.asInstanceOf[Object]
           argTypes += java.lang.Byte.TYPE
         case v: JVMTypeChar    =>
-          args += next.asInstanceOf[JVMVarChar].v.asInstanceOf[Object]
+          args += next.asInstanceOf[JVMVarInteger].asChar.asInstanceOf[Object]
           argTypes += java.lang.Character.TYPE
         case v: JVMTypeFloat   =>
           args += next.asInstanceOf[JVMVarFloat].v.asInstanceOf[Object]
@@ -264,6 +289,45 @@ class JVM(classLoader: JVMClassLoader,
 
       case Some(clsRef) =>
         val klass = new JVMClassInstance(clsRef)
+        klass.cf.fields.foreach(field => {
+          val fieldName = clsRef.getString(field.nameIndex)
+          val fieldDescriptor = clsRef.getString(field.descriptorIndex)
+
+          val fieldType = JVMMethodDescriptors.fieldDescriptorToTypes(fieldDescriptor)
+
+          val typ = resolveFieldType(fieldType, params)
+
+          /*
+          For type byte, the default value is zero, that is, the value of (byte)0.
+          For type short, the default value is zero, that is, the value of (short)0.
+          For type int, the default value is zero, that is, 0.
+          For type long, the default value is zero, that is, 0L.
+          For type float, the default value is positive zero, that is, 0.0f.
+          For type double, the default value is positive zero, that is, 0.0.
+          For type char, the default value is the null character, that is, '\u0000'.
+          For type boolean, the default value is false.
+          For all reference types (§2.4.6), the default value is null (§2.3).
+          Each method parameter (§2.5) is initialized to the corresponding argument value provided by the invoker of the method.
+          Each constructor parameter (§2.5) is initialized to the corresponding argument value provided by an object creation expression or explicit constructor invocation.
+          An exception-handler parameter (§2.16.2) is initialized to the thrown object representing the exception (§2.16.3).
+          A local variable must be explicitly given a value, by either initialization or assignment, before it is used.
+           */
+          
+          typ match {
+            case _: JVMTypeByte => klass.putField(fieldName, typ, JVMVarByte(0))  
+            case _: JVMTypeShort => klass.putField(fieldName, typ, JVMVarShort(0))  
+            case _: JVMTypeInt => klass.putField(fieldName, typ, JVMVarInt(0))  
+            case _: JVMTypeLong => klass.putField(fieldName, typ, JVMVarLong(0))  
+            case _: JVMTypeFloat => klass.putField(fieldName, typ, JVMVarFloat(0))  
+            case _: JVMTypeDouble => klass.putField(fieldName, typ, JVMVarByte(0))  
+            case _: JVMTypeChar => klass.putField(fieldName, typ, JVMVarChar('\u0000'))  
+            case _: JVMTypeBoolean => klass.putField(fieldName, typ, JVMVarBoolean(false))
+            case v: JVMTypeManagedClsRef => klass.putField(fieldName, typ, JVMVarObjectRefManaged(null))
+            case v: JVMTypeUnmanagedClsRef => klass.putField(fieldName, typ, JVMVarObjectRefUnmanaged(null))
+
+          }
+          
+        })
         Some(JVMVarObjectRefManaged(klass))
 
       case _ =>
@@ -279,6 +343,27 @@ class JVM(classLoader: JVMClassLoader,
 
   }
 
+  private def resolveMethodTypes(methodTypesRaw: JVMMethodDescriptors.MethodDescriptor, params: ExecuteParams): JVMMethodDescriptors.MethodDescriptor = {
+    // Turn the class strings into more useful class references
+    methodTypesRaw.copy(args = methodTypesRaw.args.map(methodType => resolveFieldType(methodType, params)))
+  }
+
+  private def resolveFieldType(typ: JVMType, params: ExecuteParams): JVMType = {
+    // Turn the class strings into more useful class references
+    typ match {
+      case v: JVMTypeObjectStr =>
+        val resolved = v.clsRaw.replace("/", ".")
+        classLoader.loadClass(resolved, this, params) match {
+          case Some(clsFile) =>
+            JVMTypeManagedClsRef(clsFile)
+          case _             =>
+            val clsRef = systemClassLoader.loadClass(resolved)
+            JVMTypeUnmanagedClsRef(clsRef)
+        }
+      case _                   => typ
+    }
+  }
+
   private def invokeMethodRef(sf: StackFrame, index: Int, getObjectRef: Boolean, params: ExecuteParams): Unit
 
   = {
@@ -291,20 +376,7 @@ class JVM(classLoader: JVMClassLoader,
     val methodDescriptor = cf.getString(nameAndType.descriptorIndex)
 
     val methodTypesRaw = JVMMethodDescriptors.methodDescriptorToTypes(methodDescriptor)
-
-    // Turn the class strings into more useful class references
-    val methodTypes = methodTypesRaw.copy(args = methodTypesRaw.args.map(methodType => methodType match {
-      case v: JVMTypeObjectStr =>
-        val resolved = v.clsRaw.replace("/", ".")
-        classLoader.loadClass(resolved, this, params) match {
-          case Some(clsFile) =>
-            methodType
-          case _             =>
-            val clsRef = systemClassLoader.loadClass(resolved)
-            JVMTypeClsRef(clsRef)
-        }
-      case _                   => methodType
-    }))
+    val methodTypes = resolveMethodTypes(methodTypesRaw, params)
 
     val resolvedClassName = className.replace("/", ".")
 
@@ -312,16 +384,18 @@ class JVM(classLoader: JVMClassLoader,
     classLoader.loadClass(resolvedClassName, this, params) match {
 
       case Some(clsRef) =>
-        clsRef.getMethod(methodName,methodDescriptor) match {
+        clsRef.getMethod(methodName, methodDescriptor) match {
           case Some(method) =>
 
             // This pops from the stack, and needs to be done before getting the object ref
             val argsRaw = JVMStackFrame.getMethodArgs(sf, methodTypes)
 
             val objectRef = if (getObjectRef) {
-              sf.stack.pop() match {
-                case v: JVMVarObject           => v.o
+              val value = sf.stack.pop()
+              value match {
+//                case v: JVMVarObject           => v.o
                 case v: JVMVarObjectRefManaged => v.klass
+                case v: JVMVarObjectRefUnmanaged => v.o
               }
             }
             else null
@@ -336,7 +410,7 @@ class JVM(classLoader: JVMClassLoader,
               case v: JVMClassInstance =>
                 if (methodName == "<init>" || v.cf.fullName().equals(resolvedClassName)) {
                   // The object ref is of the exact same class as the method we're calling, so no overridden versions to worry about
-                // Or we're calling <init>
+                  // Or we're calling <init>
                   code = Some(method.getCode().codeOrig)
                   newCf = Some(clsRef)
                 }
@@ -385,17 +459,17 @@ class JVM(classLoader: JVMClassLoader,
                 newCf = Some(clsRef)
             }
 
-            assert (code.isDefined)
-            assert (newCf.isDefined)
+            assert(code.isDefined)
+            assert(newCf.isDefined)
 
-//            val args: Seq[JVMVar] = if (methodName == "<init>") {
+            //            val args: Seq[JVMVar] = if (methodName == "<init>") {
             val args: Seq[JVMVar] = if (getObjectRef) {
               // TODO can't find in spec, but this pointer is definitely passed too
               argsRaw :+ JVMVarObjectRefManaged(objectRef.asInstanceOf[JVMClassInstance])
             }
             else argsRaw
 
-            val sfNew = new StackFrame(newCf.get, methodName, methodDescriptor)
+            val sfNew = new StackFrame(newCf.get, methodName, methodDescriptor, objectRef)
 
             sfNew.locals ++= args.reverse.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
 
@@ -431,7 +505,7 @@ class JVM(classLoader: JVMClassLoader,
         if (methodName != "<init>") {
           val objectRef = if (getObjectRef) {
             next match {
-              case v: JVMVarObject             => v.o
+//              case v: JVMVarObject             => v.o
               case v: JVMVarString             => v.v
               case v: JVMVarNewInstanceToken   => v.created.get
               case v: JVMVarObjectRefUnmanaged => v.o
@@ -448,24 +522,24 @@ class JVM(classLoader: JVMClassLoader,
             params.ui.log(s"Executing unmanaged method ${resolvedClassName} ${methodName} on ref ${objectRef} with args ${args}")
 
             //            while (objectRefTrying != null) {
-              try {
-                // Spec for invokevirtual says, if we can't call the method on the given objectRef, do it recursively with the objectRef's superclass
-                // We take advantage of running on a JVM here and just try to execute it, rather than implementing all the what-can-call-what rules
+            try {
+              // Spec for invokevirtual says, if we can't call the method on the given objectRef, do it recursively with the objectRef's superclass
+              // We take advantage of running on a JVM here and just try to execute it, rather than implementing all the what-can-call-what rules
 
-                result = methodRef.invoke(objectRef, args: _*) // :_* is the hint to expand the Seq to varargs
+              result = methodRef.invoke(objectRef, args: _*) // :_* is the hint to expand the Seq to varargs
 
-                // Done!
-                objectRefTrying = null
-              }
-              catch {
-                case e: IllegalAccessException =>
-                  params.ui.log(s"Warning: could not execute ${resolvedClassName} ${methodName} with args ${args}")
+              // Done!
+              objectRefTrying = null
+            }
+            catch {
+              case e: IllegalAccessException =>
+                params.ui.log(s"Warning: could not execute ${resolvedClassName} ${methodName} with args ${args}")
 
-              }
-//                  val newObjectRef = objectRefTrying.getClass.getSuperclass.cast(objectRefTrying)
-//                  objectRefTrying = newObjectRef
-//              }
-//            }
+            }
+            //                  val newObjectRef = objectRefTrying.getClass.getSuperclass.cast(objectRefTrying)
+            //                  objectRefTrying = newObjectRef
+            //              }
+            //            }
           }
           else {
             params.ui.log(s"Executing unmanaged static method ${resolvedClassName} ${methodName} with args ${args}")
@@ -473,18 +547,20 @@ class JVM(classLoader: JVMClassLoader,
             result = methodRef.invoke(null, args: _*) // :_* is the hint to expand the Seq to varargs
           }
 
-          result match {
-            case null       =>
-            case v: Integer => sf.push(JVMVarInt(v))
-            case v: Double  => sf.push(JVMVarDouble(v))
-            case v: Byte    => sf.push(JVMVarByte(v))
-            case v: Char    => sf.push(JVMVarChar(v))
-            case v: Float   => sf.push(JVMVarFloat(v))
-            case v: Short   => sf.push(JVMVarShort(v))
-            case v: String  => sf.push(JVMVarString(v))
-            case v: Boolean => sf.push(JVMVarBoolean(v))
-            case _          =>
-              sf.push(JVMVarObjectRefUnmanaged(result.asInstanceOf[Object]))
+          if (!methodTypes.ret.isInstanceOf[JVMTypeVoid]) {
+            result match {
+              case null       => sf.push(JVMVarObjectRefUnmanaged(null))
+              case v: Integer => sf.push(JVMVarInt(v))
+              case v: Double  => sf.push(JVMVarDouble(v))
+              case v: Byte    => sf.push(JVMVarByte(v))
+              case v: Char    => sf.push(JVMVarChar(v))
+              case v: Float   => sf.push(JVMVarFloat(v))
+              case v: Short   => sf.push(JVMVarShort(v))
+              case v: String  => sf.push(JVMVarString(v))
+              case v: Boolean => sf.push(JVMVarBoolean(v))
+              case _          =>
+                sf.push(JVMVarObjectRefUnmanaged(result.asInstanceOf[Object]))
+            }
           }
 
 
@@ -677,7 +753,7 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarObjectRefUnmanaged(null))
 
         case 0x19 => // aload
-          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val local = sf.getLocal(index)
           sf.push(local)
 
@@ -706,7 +782,7 @@ class JVM(classLoader: JVMClassLoader,
           sf.push(JVMVarInt(array.length))
 
         case 0x3a => // astore
-          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           store(index)
 
         case 0x4b => // astore_0
@@ -722,7 +798,11 @@ class JVM(classLoader: JVMClassLoader,
           store(3)
 
         case 0xbf => // athrow
-          JVM.err("Cannot handle opcode athrow yet")
+          val throwing = sf.stack.pop()
+          throwing match {
+            case v: JVMVarNewInstanceToken => throw v.created.get.asInstanceOf[Throwable]
+            case v: JVMObjectRef => throw v.asObject.asInstanceOf[Throwable]
+          }
 
         case 0x33 => // baload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
@@ -742,7 +822,7 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(op.args.head)
 
         case 0xca => // breakpoint
-          JVM.err("Cannot handle opcode breakpoint yet")
+          println("Breakpoint hit!")
 
         case 0x34 => // caload
           val index = sf.stack.pop().asInstanceOf[JVMVarInteger].asInt
@@ -759,7 +839,8 @@ class JVM(classLoader: JVMClassLoader,
           arrayref(index) = value.toChar
 
         case 0xc0 => // checkcast
-          JVM.err("Cannot handle opcode checkcast yet")
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
+          checkCast(sf, index, params, context)
 
         case 0x90 => // d2flol
           val value = sf.stack.pop().asInstanceOf[JVMVarDouble].v
@@ -820,7 +901,7 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(JVMVarDouble(v2 / v1))
 
         case 0x18 => // dload
-          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val local = sf.getLocal(index)
           sf.push(local)
 
@@ -1016,7 +1097,7 @@ class JVM(classLoader: JVMClassLoader,
 
         case 0xb4 => // getfield
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
-getField(sf, index, true, params, context)
+          getField(sf, index, true, params, context)
 
         case 0xb2 => // getstatic
           // getstatic pops objectref (a reference to an object) from the stack, retrieves the value of the static field
@@ -1050,7 +1131,7 @@ getField(sf, index, true, params, context)
               val fieldRef2 = clsRef.getField(name)
               val fieldType = fieldRef2.getType
               val fieldInstance = fieldRef2.get(fieldType)
-              sf.stack.push(JVMVarObject(fieldInstance))
+              sf.stack.push(JVMVarObjectRefUnmanaged(fieldInstance))
           }
 
         case 0xa7 => // goto
@@ -1235,9 +1316,34 @@ getField(sf, index, true, params, context)
           }
 
         case 0xc7 => // ifnonnull
-          JVM.err("Cannot handle opcode ifnonnull yet")
+          val value = sf.pop()
+
+          val isNull = value match {
+            case null => true
+            case v: JVMObjectRef => v.asObject == null
+          }
+
+          if (!isNull) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
         case 0xc6 => // ifnull
-          JVM.err("Cannot handle opcode ifnull yet")
+          val value = sf.pop()
+
+          val isNull = value match {
+            case null => true
+            case v: JVMObjectRef => v.asObject == null
+          }
+
+          if (isNull) {
+            val offset = op.args.head.asInstanceOf[JVMVarInteger].asInt
+            jumpToOffset(offset)
+            incOpCode = false
+          }
+
+
         case 0x84 => // iinc
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val const = op.args.last.asInstanceOf[JVMVarInteger].asInt
@@ -1445,7 +1551,7 @@ getField(sf, index, true, params, context)
           sf.stack.push(JVMVarLong(v2 / v1))
 
         case 0x16 => // lload
-          val index = sf.stack.head.asInstanceOf[JVMVarInteger].asInt
+          val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           val local = sf.getLocal(index)
           sf.push(local)
 
@@ -1637,7 +1743,7 @@ getField(sf, index, true, params, context)
     cls.getMethod(functionName) match {
       case Some(method) =>
         val code = method.getCode().codeOrig
-        val sf = new StackFrame(cls, functionName, cls.getString(method.descriptorIndex))
+        val sf = new StackFrame(cls, functionName, cls.getString(method.descriptorIndex), null)
         executeFrame(sf, code, parms)
       case _            => JVM.err(s"Unable to find method $functionName in class ${cls.className}")
     }
