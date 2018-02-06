@@ -13,7 +13,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class StackFrame(val cf: JVMClassFile,
-                // next 3 are for debugging
+                 // next 3 are for debugging
                  val methodName: String,
                  val methodDescriptor: String,
                  val thisPointer: Object = null) {
@@ -70,9 +70,16 @@ class JVM(classLoader: JVMClassLoader,
       case null                        =>
       case v: JVMVarString             => if (className != "java.lang.String") throw new ClassCastException
       case v: JVMVarObjectRefUnmanaged =>
-        if (v.o != null) JVM.err(sf, "Cannot handle checkcast on unmanaged types")
+        if (v.o != null) {
+          val clsRef = systemClassLoader.loadClass(className)
+          clsRef.cast(v.o)
+        }
       case v: JVMVarObjectRefManaged   =>
-        if (v.klass != null) JVM.err(sf, "Cannot handle checkcast on managed types")
+        if (v.klass != null) {
+          if (v.klass.cf.fullName() != className) {
+            throw new ClassCastException
+          }
+        }
     }
 
     sf.stack.push(value)
@@ -205,7 +212,7 @@ class JVM(classLoader: JVMClassLoader,
           args += next.asInstanceOf[JVMVarBoolean].v.asInstanceOf[Object]
           argTypes += java.lang.Boolean.TYPE
         case v: JVMTypeInt     =>
-          args += next.asInstanceOf[JVMVarInt].v.asInstanceOf[Object]
+          args += next.asInstanceOf[JVMVarInteger].asInt.asInstanceOf[Object]
           // Type gives us the class of the primitive
           argTypes += java.lang.Integer.TYPE
         case v: JVMTypeShort   =>
@@ -312,21 +319,21 @@ class JVM(classLoader: JVMClassLoader,
           An exception-handler parameter (§2.16.2) is initialized to the thrown object representing the exception (§2.16.3).
           A local variable must be explicitly given a value, by either initialization or assignment, before it is used.
            */
-          
+
           typ match {
-            case _: JVMTypeByte => klass.putField(fieldName, typ, JVMVarByte(0))  
-            case _: JVMTypeShort => klass.putField(fieldName, typ, JVMVarShort(0))  
-            case _: JVMTypeInt => klass.putField(fieldName, typ, JVMVarInt(0))  
-            case _: JVMTypeLong => klass.putField(fieldName, typ, JVMVarLong(0))  
-            case _: JVMTypeFloat => klass.putField(fieldName, typ, JVMVarFloat(0))  
-            case _: JVMTypeDouble => klass.putField(fieldName, typ, JVMVarByte(0))  
-            case _: JVMTypeChar => klass.putField(fieldName, typ, JVMVarChar('\u0000'))  
-            case _: JVMTypeBoolean => klass.putField(fieldName, typ, JVMVarBoolean(false))
-            case v: JVMTypeManagedClsRef => klass.putField(fieldName, typ, JVMVarObjectRefManaged(null))
+            case _: JVMTypeByte            => klass.putField(fieldName, typ, JVMVarByte(0))
+            case _: JVMTypeShort           => klass.putField(fieldName, typ, JVMVarShort(0))
+            case _: JVMTypeInt             => klass.putField(fieldName, typ, JVMVarInt(0))
+            case _: JVMTypeLong            => klass.putField(fieldName, typ, JVMVarLong(0))
+            case _: JVMTypeFloat           => klass.putField(fieldName, typ, JVMVarFloat(0))
+            case _: JVMTypeDouble          => klass.putField(fieldName, typ, JVMVarByte(0))
+            case _: JVMTypeChar            => klass.putField(fieldName, typ, JVMVarChar('\u0000'))
+            case _: JVMTypeBoolean         => klass.putField(fieldName, typ, JVMVarBoolean(false))
+            case v: JVMTypeManagedClsRef   => klass.putField(fieldName, typ, JVMVarObjectRefManaged(null))
             case v: JVMTypeUnmanagedClsRef => klass.putField(fieldName, typ, JVMVarObjectRefUnmanaged(null))
 
           }
-          
+
         })
         Some(JVMVarObjectRefManaged(klass))
 
@@ -364,16 +371,147 @@ class JVM(classLoader: JVMClassLoader,
     }
   }
 
-  private def invokeMethodRef(sf: StackFrame, index: Int, getObjectRef: Boolean, params: ExecuteParams): Unit
+  case class InvokeMethodParms(
+                                invokeStatic: Boolean,
+
+                                invokeVirtual: Boolean,
+
+                                invokeSpecial: Boolean,
+
+                                invokeInterface: Boolean
+                              ) {
+    def getObjectRef = !invokeStatic
+  }
+
+  // Find the right method, following Java virtual rules in 5.4.3.3 Method Resolution
+  private def recursivelyFindMethod(sf: StackFrame, C: JVMClassFile, objectRef: Object, methodName: String, methodDescriptor: String, resolvedClassName: String, invokeParams: InvokeMethodParms, params: ExecuteParams) = {
+    var code: Option[Seq[JVMOpCodeWithArgs]] = None
+    var newCf: Option[JVMClassFile] = None
+
+//    objectRef match {
+//
+//      case v: JVMClassInstance =>
+        //                if (methodName == "<init>" || v.cf.fullName().equals(resolvedClassName)) {
+//        if (methodName == "<init>") {
+//          // Or we're calling <init>
+//        }
+//        else
+        {
+          params.ui.log(s"Finding correct method for ${resolvedClassName} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+
+          val originalClass = C
+          var cfExamining = C
+
+          while (code.isEmpty) {
+            val possiblySimilarMethods = cfExamining.getMethods(methodName)
+
+            possiblySimilarMethods.foreach(m => {
+              if (code.isEmpty) {
+                val mDescriptor = cfExamining.getString(m.descriptorIndex)
+
+                if (mDescriptor == methodDescriptor) {
+                  // If C declares a method with the name and descriptor specified by the method reference, method lookup succeeds.
+                  code = Some(m.getCode().codeOrig)
+                  newCf = Some(cfExamining)
+
+                  params.ui.log(s"Found overridden method in ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+                }
+              }
+            })
+
+            if (code.isEmpty) {
+              var lookAtInterfaces = false
+
+              // Otherwise, if C has a superclass, step 2 of method lookup is recursively invoked on the direct superclass of C.
+              if (cfExamining.hasSuperClass()) {
+                val superClassName = cfExamining.getSuperClassName()
+
+                if (superClassName == "java/lang/Object") {
+                  lookAtInterfaces = true
+                }
+                else {
+                  classLoader.loadClass(superClassName, this, params) match {
+
+                    case Some(superClsRef) =>
+                      cfExamining = superClsRef
+                      params.ui.log(s"Looking for overridden method in super ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+
+                    case _ =>
+                      JVM.err(sf, "Cannot handle managed classes extending unmanaged yet")
+                  }
+                }
+              }
+              else {
+                lookAtInterfaces = true
+              }
+
+              if (lookAtInterfaces) {
+                // Otherwise, method lookup attempts to locate the referenced method in any of the superinterfaces of the specified class C.
+                JVM.err("Can't handle superinterfaces yet")
+              }
+            }
+          }
+        }
+
+//      case _ =>
+      // No overridden methods to worry about
+      //            val method = clsRef.getMethod(methodName, methodDescriptor).get
+      //            code = Some(method.getCode().codeOrig)
+      //            newCf = Some(clsRef)
+//    }
+
+//    if (code.isEmpty) {
+//      val method = C.getMethod(methodName, methodDescriptor).get
+//      code = Some(method.getCode().codeOrig)
+//      newCf = Some(C)
+//    }
+
+    (code, newCf)
+  }
+
+  // returns true if cf1 is a superclass of cf2
+  def isSuperClassOf(cf1: JVMClassFile, cf2: JVMClassFile, params: ExecuteParams): Boolean = {
+    var current = cf2
+    var out: Option[Boolean] = None
+
+    while (out.isEmpty) {
+      if (current.hasSuperClass()) {
+        val superClassName = current.getSuperClassName().replace('/','.')
+
+        if (superClassName == "java.lang.Object") {
+          out = Some(false)
+        }
+        else {
+          classLoader.loadClass(superClassName, this, params) match {
+
+            case Some(superClass) => current = superClass
+          }
+        }
+      }
+      else {
+        out = Some(false)
+      }
+
+      if (out.isEmpty && current.fullName() == cf1.fullName()) {
+        out = Some(true)
+      }
+    }
+
+
+    out.get
+  }
+
+  private def invokeMethodRef(sf: StackFrame, index: Int, invokeParams: InvokeMethodParms, params: ExecuteParams): Unit
 
   = {
     val cf = sf.cf
-    val fieldRef = cf.getConstant(index).asInstanceOf[ConstantRef]
-    val cls = cf.getConstant(fieldRef.classIndex).asInstanceOf[ConstantClass]
+    val methodRef = cf.getConstant(index).asInstanceOf[ConstantRef]
+    val cls = cf.getConstant(methodRef.classIndex).asInstanceOf[ConstantClass]
     val className = cf.getString(cls.nameIndex)
-    val nameAndType = cf.getConstant(fieldRef.nameAndTypeIndex).asInstanceOf[ConstantNameAndType]
+    val nameAndType = cf.getConstant(methodRef.nameAndTypeIndex).asInstanceOf[ConstantNameAndType]
     val methodName = cf.getString(nameAndType.nameIndex)
     val methodDescriptor = cf.getString(nameAndType.descriptorIndex)
+
 
     val methodTypesRaw = JVMMethodDescriptors.methodDescriptorToTypes(methodDescriptor)
     val methodTypes = resolveMethodTypes(methodTypesRaw, params)
@@ -384,103 +522,95 @@ class JVM(classLoader: JVMClassLoader,
     classLoader.loadClass(resolvedClassName, this, params) match {
 
       case Some(clsRef) =>
-        clsRef.getMethod(methodName, methodDescriptor) match {
-          case Some(method) =>
+        //        clsRef.getMethod(methodName, methodDescriptor) match {
+        //          case Some(method) =>
 
-            // This pops from the stack, and needs to be done before getting the object ref
-            val argsRaw = JVMStackFrame.getMethodArgs(sf, methodTypes)
+        // This pops from the stack, and needs to be done before getting the object ref
+        val argsRaw = JVMStackFrame.getMethodArgs(sf, methodTypes)
 
-            val objectRef = if (getObjectRef) {
-              val value = sf.stack.pop()
-              value match {
-//                case v: JVMVarObject           => v.o
-                case v: JVMVarObjectRefManaged => v.klass
-                case v: JVMVarObjectRefUnmanaged => v.o
-              }
-            }
-            else null
+        val objectRef = if (invokeParams.getObjectRef) {
+          val value = sf.stack.pop()
+          value match {
+            //                case v: JVMVarObject           => v.o
+            case v: JVMVarObjectRefManaged   => v.klass
+            case v: JVMVarObjectRefUnmanaged => v.o
+          }
+        }
+        else null
 
 
-            var code: Option[Seq[JVMOpCodeWithArgs]] = None
-            var newCf: Option[JVMClassFile] = None
+        var code: Option[Seq[JVMOpCodeWithArgs]] = None
+        var newCf: Option[JVMClassFile] = None
+        val currentClass = sf.cf
 
-            // Find the right method, following Java virtual rules
-            objectRef match {
+        if (invokeParams.invokeVirtual) {
+          val classOfRef: JVMClassFile = objectRef match {
+            case v: JVMVarObjectRefManaged => v.klass.cf
+            case v: JVMClassInstance => v.cf
+          }
 
-              case v: JVMClassInstance =>
-                if (methodName == "<init>" || v.cf.fullName().equals(resolvedClassName)) {
-                  // The object ref is of the exact same class as the method we're calling, so no overridden versions to worry about
-                  // Or we're calling <init>
-                  code = Some(method.getCode().codeOrig)
-                  newCf = Some(clsRef)
-                }
-                else {
-                  // invokevirtual: see if there's an overridden version of this method
-                  params.ui.log(s"Finding correct method for ${resolvedClassName} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
+          // Spec says to resolve first on clsRef, but can't see the point
+          val (codeVirtual, newCfVirtual) = recursivelyFindMethod(sf, classOfRef, objectRef, methodName, methodDescriptor, resolvedClassName, invokeParams, params)
+          code = codeVirtual
+          newCf = newCfVirtual
+        }
+        else if (invokeParams.invokeStatic || invokeParams.invokeInterface) {
+          val (codeTemp, newCfTemp) = recursivelyFindMethod(sf, clsRef, objectRef, methodName, methodDescriptor, resolvedClassName, invokeParams, params)
+          code = codeTemp
+          newCf = newCfTemp
+        }
+        else if (invokeParams.invokeSpecial) {
+          val (codeResolved, newCfResolved) = recursivelyFindMethod(sf, clsRef, objectRef, methodName, methodDescriptor, resolvedClassName, invokeParams, params)
 
-                  var cfExamining = v.cf
+          val isSuperSet = (clsRef.accessFlags & 0x0020) != 0
+          val isSuperClass = isSuperClassOf(newCfResolved.get, currentClass, params)
 
-                  while (code.isEmpty) {
-                    val possiblySimilarMethods = cfExamining.getMethods(methodName)
+          if (isSuperSet && isSuperClass && methodName != "<init>" && methodName != "<clinit>") {
+            val superClassName = clsRef.getSuperClassName()
+            classLoader.loadClass(superClassName, this, params) match {
+              case Some(superClsRef) =>
+                params.ui.log(s"invokespecial overriding with special ref in ${superClsRef.fullName()}")
 
-                    possiblySimilarMethods.foreach(m => {
-                      if (code.isEmpty) {
-                        val mDescriptor = cfExamining.getString(m.descriptorIndex)
-
-                        if (mDescriptor == methodDescriptor) {
-                          // Found an overridden version
-                          code = Some(m.getCode().codeOrig)
-                          newCf = Some(cfExamining)
-
-                          params.ui.log(s"Found overridden method in ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
-                        }
-                      }
-                    })
-
-                    if (code.isEmpty) {
-                      val superClassName = cfExamining.getSuperClassName()
-
-                      classLoader.loadClass(superClassName, this, params) match {
-
-                        case Some(superClsRef) =>
-                          cfExamining = superClsRef
-                          params.ui.log(s"Looking for overridden method in super ${cfExamining.fullName()} ${methodName} ${methodDescriptor} for object ref ${objectRef}")
-
-                        case _ =>
-                          JVM.err(sf, "Cannot handle managed classes extending unmanaged yet")
-                      }
-                    }
-                  }
-                }
+                val (codeTemp, newCfTemp) = recursivelyFindMethod(sf, superClsRef, objectRef, methodName, methodDescriptor, resolvedClassName, invokeParams, params)
+                code = codeTemp
+                newCf = newCfTemp
 
               case _ =>
-                // No overridden methods to worry about
-                code = Some(method.getCode().codeOrig)
-                newCf = Some(clsRef)
+                JVM.err("Cannot handle managed types derived from unmanaged yet")
+                null
             }
+          }
+          else {
+            code = codeResolved
+            newCf = newCfResolved
+          }
 
-            assert(code.isDefined)
-            assert(newCf.isDefined)
-
-            //            val args: Seq[JVMVar] = if (methodName == "<init>") {
-            val args: Seq[JVMVar] = if (getObjectRef) {
-              // TODO can't find in spec, but this pointer is definitely passed too
-              argsRaw :+ JVMVarObjectRefManaged(objectRef.asInstanceOf[JVMClassInstance])
-            }
-            else argsRaw
-
-            val sfNew = new StackFrame(newCf.get, methodName, methodDescriptor, objectRef)
-
-            sfNew.locals ++= args.reverse.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
-
-            params.ui.log(s"Executing managed method ${newCf.get.fullName()} ${methodName} with stack frame ${sfNew} ")
-
-            executeFrame(sfNew, code.get, params) match {
-              case Some(ret) => sf.stack.push(ret)
-              case _         =>
-            }
-          case _            => JVM.err(s"Unable to find method $methodName in class ${clsRef.className}")
         }
+
+
+
+        assert(code.isDefined)
+        assert(newCf.isDefined)
+
+        //            val args: Seq[JVMVar] = if (methodName == "<init>") {
+        val args: Seq[JVMVar] = if (invokeParams.getObjectRef) {
+          // TODO can't find in spec, but this pointer is definitely passed too
+          argsRaw :+ JVMVarObjectRefManaged(objectRef.asInstanceOf[JVMClassInstance])
+        }
+        else argsRaw
+
+        val sfNew = new StackFrame(newCf.get, methodName, methodDescriptor, objectRef)
+
+        sfNew.locals ++= args.reverse.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
+
+        params.ui.log(s"Executing managed method ${newCf.get.fullName()} ${methodName} with stack frame ${sfNew} ")
+
+        executeFrame(sfNew, code.get, params) match {
+          case Some(ret) => sf.stack.push(ret)
+          case _         =>
+        }
+      //          case _            => JVM.err(s"Unable to find method $methodName in class ${clsRef.className}")
+      //        }
 
       case _ =>
         val clsRef = systemClassLoader.loadClass(resolvedClassName)
@@ -488,7 +618,7 @@ class JVM(classLoader: JVMClassLoader,
         // This pops from the stack
         val (args, argTypes) = getMethodArgsAsObjects(sf, methodTypes, params)
 
-        val next = if (getObjectRef) sf.stack.pop() else null
+        val next = if (invokeParams.getObjectRef) sf.stack.pop() else null
 
         if (next.isInstanceOf[JVMVarNewInstanceToken] && next.asInstanceOf[JVMVarNewInstanceToken].created.isEmpty) {
           val newInstance = next.asInstanceOf[JVMVarNewInstanceToken]
@@ -503,9 +633,9 @@ class JVM(classLoader: JVMClassLoader,
 
         // Don't need to call <init>, it's done for us for unmanaged classes by real JVM
         if (methodName != "<init>") {
-          val objectRef = if (getObjectRef) {
+          val objectRef = if (invokeParams.getObjectRef) {
             next match {
-//              case v: JVMVarObject             => v.o
+              //              case v: JVMVarObject             => v.o
               case v: JVMVarString             => v.v
               case v: JVMVarNewInstanceToken   => v.created.get
               case v: JVMVarObjectRefUnmanaged => v.o
@@ -518,7 +648,7 @@ class JVM(classLoader: JVMClassLoader,
           var objectRefTrying: Any = objectRef
           var result: Any = null
 
-          if (getObjectRef) {
+          if (invokeParams.getObjectRef) {
             params.ui.log(s"Executing unmanaged method ${resolvedClassName} ${methodName} on ref ${objectRef} with args ${args}")
 
             //            while (objectRefTrying != null) {
@@ -559,7 +689,13 @@ class JVM(classLoader: JVMClassLoader,
               case v: String  => sf.push(JVMVarString(v))
               case v: Boolean => sf.push(JVMVarBoolean(v))
               case _          =>
-                sf.push(JVMVarObjectRefUnmanaged(result.asInstanceOf[Object]))
+                result match {
+                  case v: JVMClassInstance =>
+                    sf.push(JVMVarObjectRefManaged(v))
+                  case _                   =>
+                    sf.push(JVMVarObjectRefUnmanaged(result.asInstanceOf[Object]))
+                }
+
             }
           }
 
@@ -573,95 +709,12 @@ class JVM(classLoader: JVMClassLoader,
   private def invokeInterface(sf: StackFrame, index: Int, count: Int, getObjectRef: Boolean, params: ExecuteParams): Unit
 
   = {
-    invokeMethodRef(sf, index, getObjectRef, params)
-    //    val cf = sf.cf
-    //    val interfaceRef = cf.getConstant(index).asInstanceOf[ConstantInterfaceMethodref]
-    //    val cls = cf.getConstant(interfaceRef.classIndex).asInstanceOf[ConstantClass]
-    //    val className = cf.getString(cls.nameIndex)
-    //    val nameAndType = cf.getConstant(interfaceRef.nameAndTypeIndex).asInstanceOf[ConstantNameAndType]
-    //    val methodName = cf.getString(nameAndType.nameIndex)
-    //    val methodDescriptor = cf.getString(nameAndType.descriptorIndex)
-    //    val methodTypes = JVMMethodDescriptors.methodDescriptorToTypes(methodDescriptor)
-    //    val resolvedClassName = className.replace("/", ".")
-    //
-    //    // See JVMClassLoader for a description of what's going on here
-    //    classLoader.loadClass(resolvedClassName, this, params) match {
-    //
-    //      case Some(clsRef) =>
-    //        clsRef.getMethod(methodName) match {
-    //          case Some(method) =>
-    //            val code = method.getCode().codeOrig
-    //            val sfNew = new StackFrame(clsRef, methodName)
-    //
-    //            // This pops from the stack
-    //            val argsRaw = JVMStackFrame.getMethodArgs(sf, methodTypes)
-    //
-    //            val objectRef = if (getObjectRef) {
-    //              sf.stack.pop() match {
-    //                case v: JVMVarObject           => v.o
-    //                case v: JVMVarObjectRefManaged => v.klass
-    //              }
-    //            }
-    //            else null
-    //
-    //            val args: Seq[JVMVar] = if (methodName == "<init>") {
-    //              // TODO can't find in spec, but this pointer is definitely passed too
-    //              argsRaw :+ JVMVarObjectRefManaged(objectRef.asInstanceOf[JVMClassInstance])
-    //            }
-    //            else argsRaw
-    //
-    //            sfNew.locals ++= args.zipWithIndex.map(arg => arg._2 -> arg._1).toMap
-    //
-    //            executeFrame(sfNew, code, params) match {
-    //              case Some(ret) => sf.stack.push(ret)
-    //              case _         =>
-    //            }
-    //          case _            => JVM.err(s"Unable to find method $methodName in class ${clsRef.className}")
-    //        }
-    //
-    //      case _ =>
-    //        val clsRef = systemClassLoader.loadClass(resolvedClassName)
-    //
-    //        // This pops from the stack
-    //        val (args, argTypes) = getMethodArgsAsObjects(sf, methodTypes, params)
-    //
-    //        val next = if (getObjectRef) sf.stack.pop() else null
-    //
-    //        if (next.isInstanceOf[JVMVarNewInstanceToken] && next.asInstanceOf[JVMVarNewInstanceToken].created.isEmpty) {
-    //          val newInstance = next.asInstanceOf[JVMVarNewInstanceToken]
-    //          val ctor = newInstance.clsRef.getDeclaredConstructor(argTypes: _*)
-    //          val created = ctor.newInstance(args: _*).asInstanceOf[Object]
-    //          newInstance.created = Some(created)
-    //          // Don't want to push, the newInstance token is already on the stack
-    //          //            sf.push(JVMVarObjectRefUnmanaged(created))
-    //        }
-    //
-    //
-    //
-    //        // Don't need to call <init>, it's done for us for unmanaged classes by real JVM
-    //        if (methodName != "<init>") {
-    //          val objectRef = if (getObjectRef) {
-    //            next match {
-    //              case v: JVMVarObject           => v.o
-    //              case v: JVMVarString           => v.v
-    //              case v: JVMVarNewInstanceToken => v.created.get
-    //              case v: JVMVarObjectRefUnmanaged => v.o
-    //            }
-    //          }
-    //          else null
-    //
-    //          val methodRef = clsRef.getMethod(methodName, argTypes: _*)
-    //
-    //          val result = methodRef.invoke(objectRef, args: _*) // :_* is the hint to expand the Seq to varargs
-    //
-    //          result match {
-    //            case null =>
-    //            case _    =>
-    //              sf.push(JVMVarObjectRefUnmanaged(result))
-    //          }
-    //        }
-    //    }
-
+    invokeMethodRef(sf, index, InvokeMethodParms(
+      invokeStatic = false,
+      invokeVirtual = false,
+      invokeSpecial = false,
+      invokeInterface = true
+    ), params)
   }
 
 
@@ -801,7 +854,7 @@ class JVM(classLoader: JVMClassLoader,
           val throwing = sf.stack.pop()
           throwing match {
             case v: JVMVarNewInstanceToken => throw v.created.get.asInstanceOf[Throwable]
-            case v: JVMObjectRef => throw v.asObject.asInstanceOf[Throwable]
+            case v: JVMObjectRef           => throw v.asObject.asInstanceOf[Throwable]
           }
 
         case 0x33 => // baload
@@ -1118,7 +1171,7 @@ class JVM(classLoader: JVMClassLoader,
 
           classLoader.loadClass(className, this, params) match {
             case Some(clsRef) =>
-              context.staticClasses.find(_.cf.className == className) match {
+              context.staticClasses.find(_.cf.fullName() == className) match {
                 case Some(sc) =>
                   val value = sc.getField(name)
                   sf.stack.push(value)
@@ -1227,11 +1280,17 @@ class JVM(classLoader: JVMClassLoader,
           sf.stack.push(v3)
 
         case 0xa5 => // if_acmpeq
-          JVM.err("Cannot handle opcode if_acmpne yet")
+          JVM.err("Cannot handle opcode if_acmpeq yet")
         case 0xa6 => // if_acmpne
           JVM.err("Cannot handle opcode if_acmpne yet")
+
         case 0x9f => // if_icmpeq
-          JVM.err("Cannot handle opcode if_icmpeq yet")
+          val v2 = popInt()
+          val v1 = popInt()
+          if (v1 == v2) {
+            handleJumpOpcode(op)
+          }
+
         case 0xa2 => // if_icmpge
           val v2 = popInt()
           val v1 = popInt()
@@ -1319,7 +1378,7 @@ class JVM(classLoader: JVMClassLoader,
           val value = sf.pop()
 
           val isNull = value match {
-            case null => true
+            case null            => true
             case v: JVMObjectRef => v.asObject == null
           }
 
@@ -1333,7 +1392,7 @@ class JVM(classLoader: JVMClassLoader,
           val value = sf.pop()
 
           val isNull = value match {
-            case null => true
+            case null            => true
             case v: JVMObjectRef => v.asObject == null
           }
 
@@ -1400,17 +1459,32 @@ class JVM(classLoader: JVMClassLoader,
           // https://cs.au.dk/~mis/dOvs/jvmspec/ref--33.html
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
           // TODO there are some rules to do with choosing the method here that we don't follow
-          invokeMethodRef(sf, index, true, params)
+          invokeMethodRef(sf, index, InvokeMethodParms(
+            invokeStatic = false,
+            invokeVirtual = false,
+            invokeSpecial = true,
+            invokeInterface = false
+          ), params)
 
         case 0xb8 => // invokestatic
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
-          invokeMethodRef(sf, index, false, params)
+          invokeMethodRef(sf, index, InvokeMethodParms(
+            invokeStatic = true,
+            invokeVirtual = false,
+            invokeSpecial = false,
+            invokeInterface = false
+          ), params)
 
         case 0xb6 => // invokevirtual
           // invoke virtual method on object objectref and puts the result on the stack (might be void); the method is
           // identified by method reference index in constant pool (indexbyte1 << 8 + indexbyte2)
           val index = op.args.head.asInstanceOf[JVMVarInteger].asInt
-          invokeMethodRef(sf, index, true, params)
+          invokeMethodRef(sf, index, InvokeMethodParms(
+            invokeStatic = false,
+            invokeVirtual = true,
+            invokeSpecial = false,
+            invokeInterface = false
+          ), params)
 
         case 0x80 => // ior
           val v1 = sf.stack.pop().asInstanceOf[JVMVarInteger]
